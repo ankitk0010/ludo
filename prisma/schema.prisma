@@ -1,0 +1,159 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  email        String?  @unique
+  displayName  String?
+  passwordHash String?
+  avatar       String   @default("🦊")
+  characterId  String   @default("red")
+  wins         Int      @default(0)
+  games        Int      @default(0)
+  xp           Int      @default(0)
+  level        Int      @default(1)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions     AuthSession[]
+  resetTokens  PasswordResetToken[]
+  hostedRooms  GameRoom[]   @relation("HostUser")
+  players      GamePlayer[]
+  wonMatches   GameMatch[]  @relation("WinnerUser")
+
+  @@map("users")
+}
+
+model AuthSession {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([userId])
+  @@map("auth_sessions")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+enum RoomStatus {
+  WAITING
+  PLAYING
+  FINISHED
+}
+
+model GameRoom {
+  id         String     @id @default(cuid())
+  code       String     @unique
+  status     RoomStatus @default(WAITING)
+  hostId     String
+  host       User       @relation("HostUser", fields: [hostId], references: [id])
+  maxPlayers Int        @default(4)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  players GamePlayer[]
+  matches GameMatch[]
+
+  @@map("game_rooms")
+}
+
+model GamePlayer {
+  id        String   @id @default(cuid())
+  roomId    String
+  room      GameRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  name      String
+  color     String   // red, green, yellow, blue
+  isBot     Boolean  @default(false)
+  ready     Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  moves GameMove[]
+
+  @@map("game_players")
+}
+
+model GameMatch {
+  id         String   @id @default(cuid())
+  roomId     String
+  room       GameRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  winnerId   String?
+  winner     User?    @relation("WinnerUser", fields: [winnerId], references: [id])
+  winnerColor String?
+  turnsCount Int      @default(0)
+  createdAt  DateTime @default(now())
+  endedAt    DateTime?
+
+  moves GameMove[]
+
+  @@map("game_matches")
+}
+
+model GameMove {
+  id          String     @id @default(cuid())
+  matchId     String
+  match       GameMatch  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  playerId    String
+  player      GamePlayer @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  turnNumber  Int
+  actionType  String     // ROLL_DICE, SELECT_TOKEN, USE_POWER_CARD
+  diceValue   Int?
+  details     String?
+  createdAt   DateTime   @default(now())
+
+  @@map("game_moves")
+}
+
+model VoicePhrase {
+  id          String    @id @default(cuid())
+  text        String
+  language    String    @default("hi") // hi | en | ...
+  category    String    @default("REACTION")
+  audioUrl    String?
+  icon        String    @default("🎙️")
+  characterId String?
+  isActive    Boolean   @default(true)
+  sortOrder   Int       @default(0)
+  usageCount  Int       @default(0)
+  duration    Int?
+  createdBy   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([category, language, isActive, sortOrder])
+  @@map("voice_phrases")
+}
+
+model SfxSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique // dice_roll, capture, reach_home, ...
+  name      String
+  audioUrl  String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("sfx_settings")
+}

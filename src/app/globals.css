@@ -1,0 +1,239 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .grid-cols-15 {
+    grid-template-columns: repeat(15, minmax(0, 1fr));
+  }
+
+  .grid-rows-15 {
+    grid-template-rows: repeat(15, minmax(0, 1fr));
+  }
+
+  .perspective-1000 {
+    perspective: 1000px;
+  }
+
+  .transform-style-3d {
+    transform-style: preserve-3d;
+  }
+
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* ---- Ludo depth helpers ---- */
+  .inset-glow {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -1px 0 rgba(0, 0, 0, 0.45);
+  }
+
+  .board-elevated {
+    box-shadow:
+      0 30px 70px -22px rgba(0, 0, 0, 0.75),
+      0 14px 30px -12px rgba(0, 0, 0, 0.5),
+      0 0 0 1px rgba(148, 163, 184, 0.12),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+
+  .board-frame {
+    box-shadow:
+      inset 0 2px 10px rgba(0, 0, 0, 0.55),
+      inset 0 -1px 8px rgba(0, 0, 0, 0.4),
+      0 0 18px rgba(2, 6, 23, 0.55);
+  }
+
+  .safe-area-b {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .safe-area-t {
+    padding-top: env(safe-area-inset-top);
+  }
+}
+
+/* A warm premium gaming font stack (Google-font optional, graceful fallback). */
+:root {
+  --font-game: 'Plus Jakarta Sans', 'Nunito Sans', ui-rounded, 'Segoe UI', system-ui,
+    -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+}
+
+html,
+body {
+  height: 100%;
+  height: 100dvh;
+  width: 100%;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  background-color: #080d18;
+  color: #f8fafc;
+  font-family: var(--font-game);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Mobile: no tap highlight, no double-tap zoom on interactive controls */
+body {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+button,
+a,
+[role="button"],
+input[type="range"] {
+  touch-action: manipulation;
+}
+
+/* Visible + consistent keyboard focus */
+:where(button, a, input, [role="radio"], [role="button"]):focus-visible {
+  outline: 2px solid #a78bfa;
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: #080d18;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 9999px;
+}
+
+/* =====================================================================
+   GAME ROOM — layered atmospheric background around the board
+   Layer 1: deep navy base
+   Layer 2: soft radial light above the board
+   Layer 3: corner ambient tints
+   Layer 4: faint vignette + floating motes (masked, non-clickable)
+   ===================================================================== */
+.game-room {
+  position: relative;
+  isolation: isolate;
+  background:
+    radial-gradient(1000px 620px at 50% -14%, rgba(124, 92, 255, 0.16), transparent 62%),
+    radial-gradient(760px 540px at 92% 108%, rgba(56, 211, 159, 0.10), transparent 60%),
+    radial-gradient(760px 540px at 8% 108%, rgba(255, 107, 107, 0.10), transparent 60%),
+    radial-gradient(1200px 900px at 50% 55%, rgba(30, 58, 138, 0.12), transparent 70%),
+    linear-gradient(180deg, #0b1326 0%, #080d18 48%, #0a1122 100%);
+}
+
+/* very subtle dust motes + vignette */
+.game-room::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1.5px 1.5px at 12% 22%, rgba(255, 255, 255, 0.18) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 68% 14%, rgba(255, 255, 255, 0.14) 50%, transparent 51%),
+    radial-gradient(1px 1px at 84% 68%, rgba(255, 255, 255, 0.12) 50%, transparent 51%),
+    radial-gradient(1px 1px at 27% 74%, rgba(255, 255, 255, 0.12) 50%, transparent 51%),
+    radial-gradient(1px 1px at 43% 34%, rgba(255, 255, 255, 0.08) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 61% 46%, rgba(255, 255, 255, 0.07) 50%, transparent 51%);
+  background-size: 340px 340px;
+  opacity: 0.55;
+}
+
+.game-room::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(120% 90% at 50% 45%, transparent 55%, rgba(2, 6, 23, 0.55) 100%);
+}
+
+/* Ambient shadow/glow cushion that sits directly under the elevated board */
+.board-glow {
+  position: absolute;
+  left: 50%;
+  bottom: -6%;
+  width: 92%;
+  height: 26%;
+  transform: translateX(-50%);
+  background: radial-gradient(50% 50% at 50% 50%, rgba(0, 0, 0, 0.55), transparent 70%);
+  filter: blur(18px);
+  pointer-events: none;
+  border-radius: 9999px;
+}
+
+/* =====================================================================
+   PREMIUM KEYFRAME ANIMATIONS
+   ===================================================================== */
+
+/* Dice face shimmer — sweeps a white highlight across the face */
+@keyframes dice-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Subtle token idle pulse */
+@keyframes token-idle-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); }
+  50%       { box-shadow: 0 0 0 4px rgba(255,255,255,0.12); }
+}
+
+/* Star twinkle */
+@keyframes star-twinkle {
+  0%, 100% { opacity: 1; transform: scale(1) rotate(0deg); }
+  50%       { opacity: 0.7; transform: scale(1.3) rotate(18deg); }
+}
+
+/* Board frame rim shimmer */
+@keyframes rim-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%       { opacity: 0.95; }
+}
+
+/* Home-path arrow cascade */
+@keyframes arrow-cascade {
+  0%, 100% { opacity: 0.4; }
+  50%       { opacity: 1; }
+}
+
+/* Token legal-move "bounce ready" */
+@keyframes legal-bounce {
+  0%, 100% { transform: translateY(0) scale(1); }
+  40%       { transform: translateY(-4px) scale(1.08); }
+  70%       { transform: translateY(-2px) scale(1.04); }
+}
+
+.dice-shimmer-face {
+  background: linear-gradient(
+    105deg,
+    transparent 25%,
+    rgba(255, 255, 255, 0.55) 50%,
+    transparent 75%
+  ) !important;
+  background-size: 200% 100% !important;
+  animation: dice-shimmer 0.9s ease-out;
+}
+
+.board-rim-anim {
+  animation: rim-pulse 3.5s ease-in-out infinite;
+}
+
+/* Reduce motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .game-room::before {
+    background-image: none;
+  }
+}
