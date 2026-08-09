@@ -7,6 +7,7 @@ import { ArrowLeft, Trophy } from 'lucide-react';
 import {
   createInitialGameState,
   gameReducer,
+  GameAction,
 } from '@/game/engine/reducer';
 import {
   getCurrentPlayer,
@@ -45,6 +46,9 @@ import {
   apiFetchRoom,
   apiSetReady,
   apiLeaveRoom,
+  apiRoomState,
+  apiRoomStart,
+  apiRoomAction,
 } from '@/lib/roomClient';
 
 const TURN_TIMEOUT_SECONDS = 30;
@@ -178,27 +182,51 @@ function GameContent() {
     });
   }
 
-  // Build engine seats from a synced online room (all real human players).
-  function roomSeats(room: RoomState): Player[] {
-    return room.players.map((m) => ({
-      id: m.deviceId || m.id,
-      name: m.name,
-      color: m.color as PlayerColor,
-      isBot: false,
-      avatar: getCharacter(m.color as PlayerColor).emoji,
-      avatarUrl: m.avatarUrl || undefined,
-      ready: true,
-      connected: true,
-      wins: 0,
-      xp: 0,
-    }));
-  }
+  // Apply the server's authoritative state without needless re-renders —
+  // only when something actually changed (keeps local timers/highlights stable).
+  const lastGameSig = useRef('');
+  const applyServerState = useCallback(
+    (state: GameState) => {
+      const sig = JSON.stringify([
+        state.currentTurnIndex,
+        state.dice.value,
+        state.dice.mustMove,
+        state.winner,
+        state.tokens,
+        state.pendingLuckyRoll,
+        state.activePowerCard,
+      ]);
+      if (sig === lastGameSig.current) return;
+      lastGameSig.current = sig;
+      setPlayers(state.players);
+      dispatch({ type: 'RESTORE_GAME', state });
+    },
+    []
+  );
+
+  // Route gameplay actions through the authoritative server when playing an
+  // online room, so every client sees the same board and only the owner of the
+  // current seat acts. Local modes dispatch straight into the local engine.
+  const doAction = useCallback(
+    (action: GameAction) => {
+      if (mode === 'room' && !inLobby) {
+        apiRoomAction(roomCode, deviceId, action)
+          .then((res) => {
+            if (!res.state) return;
+            applyServerState(res.state);
+          })
+          .catch(() => {});
+        return;
+      }
+      dispatch(action);
+    },
+    [mode, inLobby, roomCode, deviceId, applyServerState]
+  );
 
   // ---- Join the online room once (host creates it, guest joins it) ----
   useEffect(() => {
     if (!mounted || mode !== 'room' || !inLobby) return;
-    if (roomJoinedRef.current) return;
-    roomJoinedRef.current = true;
+    if (roomJoinedRef.current) return;    roomJoinedRef.current = true;
 
     const myName = profileName(profile) || (isHost ? 'Host' : 'Player');
     const join = async () => {
@@ -210,6 +238,7 @@ function GameContent() {
               characterId: profile.characterId,
               avatarUrl: profile.avatarUrl,
               deviceId,
+              token: getAuthToken(),
             })
           : await apiJoinRoom({
               code: roomCode,
@@ -236,11 +265,35 @@ function GameContent() {
         .then((d) => {
           setRoomState(d.room);
           setRoomError(null);
+          // The host started the match — pull the authoritative state and join the game.
+          if (d.room.status === 'PLAYING') {
+            apiRoomState(roomCode)
+              .then((s) => {
+                if (!s.state) return;
+                applyServerState(s.state);
+                setInLobby(false);
+              })
+              .catch(() => {});
+          }
         })
         .catch(() => {});
     }, 2500);
     return () => clearInterval(id);
-  }, [mounted, mode, inLobby, roomCode]);
+  }, [mounted, mode, inLobby, roomCode, applyServerState]);
+
+  // ---- Online rooms: mirror the authoritative match state as it changes ----
+  useEffect(() => {
+    if (!mounted || mode !== 'room' || inLobby) return;
+    const id = setInterval(() => {
+      apiRoomState(roomCode)
+        .then((s) => {
+          if (!s.state || s.status !== 'PLAYING') return;
+          applyServerState(s.state);
+        })
+        .catch(() => {});
+    }, 1200);
+    return () => clearInterval(id);
+  }, [mounted, mode, inLobby, roomCode, applyServerState]);
 
   // ---- Dice reveal gate: only show legal-move hints / auto-move AFTER the
   //      dice finishes its spinning animation (so the number is revealed first).
@@ -258,9 +311,19 @@ function GameContent() {
     };
   }, [gameState.dice.value, gameState.dice.rolling]);
 
+  const myPlayerId = mode === 'room' ? deviceId : 'p1';
+  const mySeat = gameState.players.find((p) => p.id === myPlayerId);
+  // Seat helpers: the local player sits in their own seat (chosen color in
+  // local modes, assigned seat in online rooms).
+  const localColor = mySeat?.color ?? profile.characterId;
+  const localPlayer = mySeat ?? gameState.players[0];
+
   const currentPlayer = getCurrentPlayer(gameState);
   const legalMoves = useMemo(() => getLegalMoveOptionsForCurrentPlayer(gameState), [gameState]);
-  const isMyTurn = !currentPlayer.isBot;
+  // Online rooms: only your own seat is "you" — never play a friend's turn.
+  // Local modes: every human seat is playable on this device.
+  const isMyTurn =
+    mode === 'room' ? !currentPlayer.isBot && currentPlayer.id === myPlayerId : !currentPlayer.isBot;
   // Only show which gotis may move after the dice number has been revealed,
   // and only when it is the human player's turn.
   const visibleLegalMoves = isMyTurn && diceSettled ? legalMoves : [];
@@ -274,17 +337,17 @@ function GameContent() {
 
     if (legalMoves.length === 1) {
       const t = setTimeout(() => {
-        dispatch({ type: 'SELECT_TOKEN', targetTokenId: legalMoves[0].tokenId });
+        doAction({ type: 'SELECT_TOKEN', targetTokenId: legalMoves[0].tokenId });
       }, 700);
       return () => clearTimeout(t);
     }
     if (legalMoves.length === 0 && gameState.dice.mustMove) {
       const t = setTimeout(() => {
-        dispatch({ type: 'PASS_TURN' });
+        doAction({ type: 'PASS_TURN' });
       }, 600);
       return () => clearTimeout(t);
     }
-  }, [isMyTurn, diceSettled, inLobby, legalMoves, gameState.status, gameState.winner, gameState.dice.mustMove]);
+  }, [isMyTurn, diceSettled, inLobby, legalMoves, gameState.status, gameState.winner, gameState.dice.mustMove, doAction]);
 
   // Finished-goti counters per color (shown on the mobile player boxes).
   const homeCounts = useMemo(() => {
@@ -295,14 +358,6 @@ function GameContent() {
     return map;
   }, [gameState.tokens]);
 
-  // Which player is "speaking" right now (your mic dot).
-  const myPlayerId = mode === 'room' ? deviceId : 'p1';
-  const mySeat = gameState.players.find((p) => p.id === myPlayerId);
-
-  // Seat helpers: the local player sits in their own seat (chosen color in
-  // local modes, assigned seat in online rooms).
-  const localColor = mySeat?.color ?? profile.characterId;
-  const localPlayer = mySeat ?? gameState.players[0];
   const speakingSeat = meSpeaking ? localColor : undefined;
   const opponents = gameState.players.filter((p) => p.id !== myPlayerId);
 
@@ -407,33 +462,34 @@ function GameContent() {
     if (currentPlayer.isBot) {
       const timer = setTimeout(() => {
         if (!gameState.dice.mustMove && !gameState.dice.noLegalMove) {
-          dispatch({ type: 'ROLL_DICE' });
+          doAction({ type: 'ROLL_DICE' });
         } else if (gameState.dice.value !== null && !gameState.dice.noLegalMove) {
           const bestMove = getBestBotMove(gameState, currentPlayer.color, gameState.dice.value);
           if (bestMove) {
             soundEngine.playTokenMove();
-            dispatch({ type: 'SELECT_TOKEN', targetTokenId: bestMove.tokenId });
+            doAction({ type: 'SELECT_TOKEN', targetTokenId: bestMove.tokenId });
           } else {
-            dispatch({ type: 'PASS_TURN' });
+            doAction({ type: 'PASS_TURN' });
           }
         }
       }, 900);
 
       return () => clearTimeout(timer);
     }
-  }, [mounted, gameState, currentPlayer, inLobby]);
+  }, [mounted, gameState, currentPlayer, inLobby, doAction]);
 
   // ---- Auto-pass after showing the rolled dice when there are no legal moves ----
   useEffect(() => {
     if (!mounted || inLobby || gameState.status !== 'playing' || gameState.winner) return;
+    if (mode === 'room' && !isMyTurn) return; // only the seat owner passes
     if (!gameState.dice.noLegalMove) return;
 
     const timer = setTimeout(() => {
-      dispatch({ type: 'PASS_TURN' });
+      doAction({ type: 'PASS_TURN' });
     }, 1600);
 
     return () => clearTimeout(timer);
-  }, [mounted, inLobby, gameState.dice.noLegalMove, gameState.status, gameState.winner]);
+  }, [mounted, inLobby, mode, isMyTurn, gameState.dice.noLegalMove, gameState.status, gameState.winner, doAction]);
 
   // ---- 60s Turn Timer (human turns only): auto roll + auto move ----
   useEffect(() => {
@@ -458,7 +514,7 @@ function GameContent() {
       clearTimeout(resetT);
       clearInterval(interval);
     };
-  }, [mounted, inLobby, gameState.status, gameState.winner, currentPlayer, gameState.dice.mustMove, gameState.dice.noLegalMove]);
+  }, [mounted, inLobby, gameState.status, gameState.winner, currentPlayer, gameState.dice.mustMove, gameState.dice.noLegalMove, doAction]);
 
   // When timer reaches 0, act on behalf of the human player — but never while
 // the dice is still spinning or before its result has been revealed.
@@ -470,7 +526,7 @@ function GameContent() {
     // Time is up and a roll is expected — roll immediately.
     if (!gameState.dice.mustMove) {
       timerKeyRef.current += 1;
-      dispatch({ type: 'ROLL_DICE' });
+      doAction({ type: 'ROLL_DICE' });
       return;
     }
 
@@ -481,11 +537,11 @@ function GameContent() {
     const bestMove = getBestBotMove(gameState, currentPlayer.color, gameState.dice.value);
     if (bestMove) {
       soundEngine.playTokenMove();
-      dispatch({ type: 'SELECT_TOKEN', targetTokenId: bestMove.tokenId });
+      doAction({ type: 'SELECT_TOKEN', targetTokenId: bestMove.tokenId });
     } else {
-      dispatch({ type: 'PASS_TURN' });
+      doAction({ type: 'PASS_TURN' });
     }
-  }, [turnTimeLeft, diceSettled, mounted, inLobby, gameState, currentPlayer]);
+  }, [turnTimeLeft, diceSettled, mounted, inLobby, gameState, currentPlayer, doAction]);
 
   // Browser back-button guard: warn before leaving an active match.
   useEffect(() => {
@@ -518,7 +574,7 @@ function GameContent() {
   }
 
   const handleRollDice = () => {
-    dispatch({ type: 'ROLL_DICE' });
+    doAction({ type: 'ROLL_DICE' });
   };
 
   const handleSelectToken = (tokenId: string) => {
@@ -527,11 +583,11 @@ function GameContent() {
   };
 
   const handleUsePowerCard = (cardType: PowerCardType) => {
-    dispatch({ type: 'USE_POWER_CARD', cardType });
+    doAction({ type: 'USE_POWER_CARD', cardType });
   };
 
   const handleSelectLuckyRoll = (value: number) => {
-    dispatch({ type: 'ROLL_DICE', overrideValue: value });
+    doAction({ type: 'ROLL_DICE', overrideValue: value });
   };
 
   const handleAddBotInLobby = () => {
@@ -557,12 +613,16 @@ function GameContent() {
   const handleStartFromLobby = () => {
     localStorage.removeItem(storageKey);
     if (mode === 'room') {
-      // Online rooms never start with bots — require a synced real roster.
+      // Online rooms: the server begins the match and every player then plays
+      // the SAME authoritative board (guests are pulled in via the poll).
       if (!roomState || roomState.players.length < 2) return;
-      const seats = roomSeats(roomState);
-      setPlayers(seats);
-      dispatch({ type: 'RESTORE_GAME', state: createInitialGameState(seats, roomCode) });
-      setInLobby(false);
+      apiRoomStart(roomCode, deviceId)
+        .then((res) => {
+          if (!res.state) return;
+          applyServerState(res.state);
+          setInLobby(false);
+        })
+        .catch((e) => setRoomError(e instanceof Error ? e.message : 'Could not start the game'));
       return;
     }
     const next = buildSeats(profile, defaultSeats);
@@ -996,7 +1056,7 @@ function GameContent() {
                     isMyTurn={isMyTurn}
                     onUseCard={handleUsePowerCard}
                     onSelectLuckyRoll={handleSelectLuckyRoll}
-                    onCancelLuckyRoll={() => dispatch({ type: 'CANCEL_LUCKY_ROLL' })}
+                    onCancelLuckyRoll={() => doAction({ type: 'CANCEL_LUCKY_ROLL' })}
                     pendingLuckyRoll={gameState.pendingLuckyRoll}
                   />
                 </div>
@@ -1098,7 +1158,7 @@ function GameContent() {
                       handleUsePowerCard(card);
                     }}
                     onSelectLuckyRoll={handleSelectLuckyRoll}
-                    onCancelLuckyRoll={() => dispatch({ type: 'CANCEL_LUCKY_ROLL' })}
+                    onCancelLuckyRoll={() => doAction({ type: 'CANCEL_LUCKY_ROLL' })}
                     pendingLuckyRoll={gameState.pendingLuckyRoll}
                   />
                 </motion.div>
@@ -1122,7 +1182,7 @@ function GameContent() {
               players={gameState.players}
               onPlayAgain={() => {
                 localStorage.removeItem(storageKey);
-                dispatch({ type: 'START_GAME' });
+                doAction({ type: 'START_GAME' });
               }}
               onReturnHome={handleLeaveRoom}
             />

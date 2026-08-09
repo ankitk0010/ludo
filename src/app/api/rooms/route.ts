@@ -65,12 +65,37 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Room code already in use' }, { status: 409 });
     }
 
-    // Create or find a default user for host (keeps leaderboard updated).
-    const user = await prisma.user.upsert({
-      where: { username: hostName.toLowerCase() },
-      update: {},
-      create: { username: hostName.toLowerCase(), avatar: '🦊', characterId },
-    });
+    // If the host is signed in, attach the room to their real account. A
+    // display-name / avatar edit must NEVER spawn a brand-new user or a
+    // duplicate leaderboard entry, so we key off the session, not the name.
+    let user: { id: string; username: string };
+    const auth = request.headers.get('authorization') || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : null;
+    if (token) {
+      const session = await prisma.authSession.findUnique({
+        where: { token },
+        include: { user: true },
+      });
+      if (session && session.expiresAt >= new Date()) {
+        user = session.user;
+        await prisma.user
+          .update({ where: { id: user.id }, data: { characterId } })
+          .catch(() => {});
+      } else {
+        user = await prisma.user.upsert({
+          where: { username: hostName.toLowerCase() },
+          update: {},
+          create: { username: hostName.toLowerCase(), avatar: '🦊', characterId },
+        });
+      }
+    } else {
+      // Guest host (no account): fall back to a name-based identity.
+      user = await prisma.user.upsert({
+        where: { username: hostName.toLowerCase() },
+        update: {},
+        create: { username: hostName.toLowerCase(), avatar: '🦊', characterId },
+      });
+    }
 
     const room = await prisma.gameRoom.create({
       data: {

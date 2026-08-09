@@ -1,4 +1,5 @@
-import { PlayerColor } from '@/game/engine/types';
+import { PlayerColor, Player, GameState } from '@/game/engine/types';
+import { GameAction } from '@/game/engine/reducer';
 
 export interface RoomMember {
   id: string;
@@ -37,10 +38,12 @@ export function getDeviceId(): string {
   }
 }
 
-async function postJson<T>(url: string, body: unknown): Promise<T> {
+async function postJson<T>(url: string, body: unknown, token?: string | null): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
@@ -54,8 +57,11 @@ export async function apiCreateRoom(input: {
   characterId: PlayerColor;
   avatarUrl?: string;
   deviceId: string;
+  /** Signed-in session token — lets the server attach the room to your real account. */
+  token?: string | null;
 }): Promise<{ room: RoomState }> {
-  return postJson('/api/rooms', input);
+  const { token, ...body } = input;
+  return postJson('/api/rooms', body, token);
 }
 
 export async function apiJoinRoom(input: {
@@ -96,4 +102,46 @@ export async function apiLeaveRoom(input: { code: string; deviceId: string }): P
   } catch {
     /* best-effort */
   }
+}
+
+// ---- Online room match: authoritative game state ----
+
+export async function apiRoomState(code: string): Promise<{
+  code: string;
+  status: string;
+  state: GameState | null;
+}> {
+  const res = await fetch(`/api/rooms/${encodeURIComponent(code)}/game`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to load game');
+  return data;
+}
+
+export async function apiRoomStart(
+  code: string,
+  deviceId: string
+): Promise<{ state: GameState; players: Player[] }> {
+  const res = await fetch(`/api/rooms/${encodeURIComponent(code)}/game`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deviceId, action: { start: true } }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Could not start the game');
+  return data;
+}
+
+export async function apiRoomAction(
+  code: string,
+  deviceId: string,
+  action: GameAction
+): Promise<{ state: GameState; players: Player[] }> {
+  const res = await fetch(`/api/rooms/${encodeURIComponent(code)}/game`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deviceId, action }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Action failed');
+  return data;
 }

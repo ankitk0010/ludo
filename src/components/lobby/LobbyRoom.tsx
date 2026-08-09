@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Copy, Check, UserPlus, Play, Bot, Lock, Shapes, Share2, Eye } from 'lucide-react';
+import { Copy, Check, UserPlus, Play, Bot, Lock, Shapes, Share2, Eye, X } from 'lucide-react';
 import { Player, PlayerColor } from '@/game/engine/types';
 import { GameSettings } from '@/game/settings';
 import { AvatarSelector } from '@/components/avatar/AvatarSelector';
@@ -76,6 +76,8 @@ export const LobbyRoom: React.FC<LobbyRoomProps> = ({
   const colors: PlayerColor[] = ['red', 'green', 'yellow', 'blue'];
   const allReady = players.length >= 2 && players.every((p) => p.ready || p.isBot);
   const readyCount = players.filter((p) => p.ready || p.isBot).length;
+  const localPlayer = players.find((p) => p.id === localPlayerId);
+  const localReady = localPlayer?.ready ?? false;
 
   return (
     <div className="w-full max-w-lg mx-auto bg-slate-900 border-2 border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
@@ -257,9 +259,13 @@ export const LobbyRoom: React.FC<LobbyRoomProps> = ({
         ) : (
           <button
             onClick={onToggleReady}
-            className="w-full py-4 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 font-black text-white text-base tracking-wider shadow-xl shadow-purple-600/30 transition-transform active:scale-95"
+            className={`w-full py-4 rounded-2xl font-black text-white text-base tracking-wider shadow-xl transition-transform active:scale-95 ${
+              localReady
+                ? 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 shadow-amber-600/30'
+                : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 shadow-purple-600/30'
+            }`}
           >
-            TOGGLE READY STATE
+            {localReady ? <X className="w-5 h-5" /> : <Check className="w-5 h-5" />} {localReady ? 'CANCEL' : 'GET READY'}
           </button>
         )}
 

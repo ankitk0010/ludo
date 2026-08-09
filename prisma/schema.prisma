@@ -113,6 +113,8 @@ model GameRoom {
   hostId     String
   host       User       @relation("HostUser", fields: [hostId], references: [id])
   maxPlayers Int        @default(4)
+  /// Authoritative serialized game state while the room match is running.
+  state      Json?
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 
