@@ -115,6 +115,8 @@ model GameRoom {
   maxPlayers Int        @default(4)
   /// Authoritative serialized game state while the room match is running.
   state      Json?
+  /// Recent quick-line voice messages (delivered to the other players).
+  voiceMessages Json?
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 

@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Volume2, X, Layers } from 'lucide-react';
-import { Player } from '@/game/engine/types';
+import { Player, PlayerColor } from '@/game/engine/types';
 import { gameTheme } from '@/theme/tokens';
 import { soundEngine } from '@/components/sound/soundEngine';
 import { VoicePhrase } from '@/lib/voiceTypes';
@@ -13,6 +13,7 @@ import {
   playPhrase,
   preloadPhrases,
 } from '@/game/voicePhrases';
+import { apiRoomVoice, RoomVoiceMessage } from '@/lib/roomClient';
 
 interface VoiceBubble {
   id: number;
@@ -37,11 +38,23 @@ type LangFilter = 'all' | 'hi' | 'en';
  * phrase; a speech bubble pops up near their profile and the phrase is spoken
  * (TTS in the phrase's language, or the admin-uploaded audio clip). The list
  * is managed by admins through the Voice Library — the game only fetches it.
+ *
+ * In online rooms the tapped phrase is also relayed through the authoritative
+ * room API so every other player hears it and sees a bubble with the sender's
+ * name/color (real-time via the room SSE stream).
  */
 export const VoiceChat: React.FC<{
   players: Player[];
   className?: string;
-}> = ({ players, className = '' }) => {
+  /** Online room relay: send taps to the room and show incoming messages. */
+  roomMode?: boolean;
+  roomCode?: string;
+  deviceId?: string;
+  /** Incoming room voice messages to surface as bubbles (already de-duplicated). */
+  incoming?: RoomVoiceMessage[];
+  /** Called once the incoming messages have been displayed. */
+  onIncomingHandled?: () => void;
+}> = ({ players, className = '', roomMode = false, roomCode, deviceId, incoming = [], onIncomingHandled }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [bubble, setBubble] = useState<VoiceBubble | null>(null);
   const [unread, setUnread] = useState(0);
@@ -101,6 +114,27 @@ export const VoiceChat: React.FC<{
     bubbleTimerRef.current = setTimeout(() => setBubble(null), 2400);
   };
 
+  // Surface incoming room messages as bubbles, speak them, and bump unread.
+  useEffect(() => {
+    if (!incoming.length) return;
+    incoming.forEach((msg) => {
+      if (msg.byDeviceId === deviceId) return;
+      const phrase = phrases.find((p) => p.id === msg.phraseId);
+      if (phrase) {
+        playPhrase(phrase);
+      }
+      showBubble({
+        id: idSeq++,
+        text: msg.text,
+        emoji: msg.icon || '💬',
+        by: msg.byName.split(' (')[0],
+        color: gameTheme.players[msg.byColor as PlayerColor]?.primary ?? '#8b5cf6',
+      });
+      if (!isOpenRef.current) setUnread((u) => u + 1);
+    });
+    onIncomingHandled?.();
+  }, [incoming, phrases, deviceId, onIncomingHandled]);
+
   const react = (phrase: VoicePhrase) => {
     if (isRateLimited()) return;
     searchesRef.current = [...searchesRef.current, nowTs()];
@@ -113,6 +147,16 @@ export const VoiceChat: React.FC<{
       by: 'You',
       color: myColorHex,
     });
+
+    // Relay to the other players in an online room.
+    if (roomMode && roomCode && deviceId) {
+      apiRoomVoice(roomCode, deviceId, {
+        phraseId: phrase.id,
+        text: phrase.text,
+        language: phrase.language,
+        icon: phrase.icon,
+      }).catch(() => {});
+    }
 
     // Bots occasionally reply with a quiet English line.
     const bots = players.filter((p) => p.isBot);

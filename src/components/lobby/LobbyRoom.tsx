@@ -3,7 +3,6 @@
 import React, { useState } from 'react';
 import { Copy, Check, UserPlus, Play, Bot, Lock, Shapes, Share2, Eye, X } from 'lucide-react';
 import { Player, PlayerColor } from '@/game/engine/types';
-import { GameSettings } from '@/game/settings';
 import { AvatarSelector } from '@/components/avatar/AvatarSelector';
 import { getCharacter } from '@/game/characters';
 import { CharacterAvatar } from '@/components/avatar/CharacterAvatar';
@@ -16,8 +15,6 @@ interface LobbyRoomProps {
   onToggleReady: () => void;
   onStartGame: () => void;
   onLeaveRoom: () => void;
-  settings: GameSettings;
-  onSettingsChange: (settings: GameSettings) => void;
   characterId?: PlayerColor;
   onCharacterChange?: (color: PlayerColor) => void;
   /** Colors already claimed by other human players (locked in the picker). */
@@ -242,47 +239,57 @@ export const LobbyRoom: React.FC<LobbyRoomProps> = ({
         )}
       </div>
 
-      {/* Action Controls */}
-      <div className="flex flex-col gap-3 pt-2">
-        {isHost ? (
-          <button
-            onClick={onStartGame}
-            disabled={!allReady}
-            className={`w-full py-4 rounded-2xl font-black text-white text-base tracking-wider flex items-center justify-center gap-2 shadow-xl transition-all ${
-              allReady
-                ? 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 cursor-pointer shadow-emerald-500/20 active:scale-95'
-                : 'bg-slate-800 text-slate-500 cursor-not-allowed'
-            }`}
-          >
-            <Play className="w-5 h-5 fill-current" /> START GAME
-          </button>
-        ) : (
-          <button
-            onClick={onToggleReady}
-            className={`w-full py-4 rounded-2xl font-black text-white text-base tracking-wider shadow-xl transition-transform active:scale-95 ${
-              localReady
-                ? 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 shadow-amber-600/30'
-                : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 shadow-purple-600/30'
-            }`}
-          >
-            {localReady ? <X className="w-5 h-5" /> : <Check className="w-5 h-5" />} {localReady ? 'CANCEL' : 'GET READY'}
-          </button>
-        )}
+      {/* Action Controls — sticky bottom bar so READY/CANCEL is always in thumb reach on mobile */}
+      <div className="sticky bottom-0 -mx-6 sm:-mx-8 -mb-6 sm:-mb-8 px-4 pb-4 pt-3 bg-gradient-to-t from-slate-900 via-slate-900/95 to-transparent">
+        <div className="flex flex-col gap-2.5">
+          {isHost ? (
+            <button
+              onClick={onStartGame}
+              disabled={!allReady}
+              className={`w-full py-4 rounded-2xl font-black text-white text-base tracking-wider flex items-center justify-center gap-2 shadow-xl transition-all ${
+                allReady
+                  ? 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 cursor-pointer shadow-emerald-500/20 active:scale-95'
+                  : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+              }`}
+            >
+              <Play className="w-5 h-5 fill-current" /> START GAME
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={onToggleReady}
+                className={`w-full py-4 rounded-2xl font-black text-white text-base tracking-wider flex items-center justify-center gap-2 shadow-xl transition-all active:scale-95 ${
+                  localReady
+                    ? 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 shadow-amber-600/30'
+                    : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-600/30'
+                }`}
+              >
+                {localReady ? <X className="w-5 h-5" /> : <Check className="w-5 h-5" />}
+                {localReady ? 'CANCEL READY' : 'GET READY'}
+              </button>
+              <p className="text-center text-[10px] font-bold text-slate-400 -mt-0.5">
+                {localReady
+                  ? 'You are ready — waiting for the host to start.'
+                  : 'Tap to mark yourself ready for the match.'}
+              </p>
+            </>
+          )}
 
-        {isHost && !allReady && (
-          <p className="text-center text-[10px] font-bold text-slate-500">
-            {players.length < 2
-              ? 'Wait for at least 2 players to join before starting.'
-              : `Everyone must be READY (${readyCount}/${players.length}) before the game can start.`}
-          </p>
-        )}
+          {isHost && !allReady && (
+            <p className="text-center text-[10px] font-bold text-slate-500">
+              {players.length < 2
+                ? 'Wait for at least 2 players to join before starting.'
+                : `Everyone must be READY (${readyCount}/${players.length}) before the game can start.`}
+            </p>
+          )}
 
-        <button
-          onClick={onLeaveRoom}
-          className="w-full py-2.5 rounded-2xl bg-slate-800/80 hover:bg-slate-800 text-slate-400 text-xs font-bold transition-colors"
-        >
-          LEAVE ROOM
-        </button>
+          <button
+            onClick={onLeaveRoom}
+            className="w-full py-3 rounded-2xl bg-slate-800/80 hover:bg-slate-800 text-slate-400 text-xs font-bold transition-colors"
+          >
+            LEAVE ROOM
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -36,7 +36,7 @@ import { CharacterAvatar } from '@/components/avatar/CharacterAvatar';
 import { gameTheme } from '@/theme/tokens';
 import { getCharacter } from '@/game/characters';
 import { loadProfile, saveProfile, profileName, PlayerProfile, getAuthToken } from '@/game/profile';
-import { loadSettings, saveSettings, GameSettings, BOARD_THEME_ACCENT } from '@/game/settings';
+import { loadSettings, GameSettings, BOARD_THEME_ACCENT } from '@/game/settings';
 import { apiUpdateProfile } from '@/lib/authClient';
 import {
   RoomState,
@@ -49,6 +49,8 @@ import {
   apiRoomState,
   apiRoomStart,
   apiRoomAction,
+  subscribeRoomStream,
+  RoomVoiceMessage,
 } from '@/lib/roomClient';
 
 const TURN_TIMEOUT_SECONDS = 30;
@@ -114,7 +116,7 @@ function GameContent() {
   const [showReconnect, setShowReconnect] = useState(false);
   const [saveInitialized, setSaveInitialized] = useState(false);
   const [turnTimeLeft, setTurnTimeLeft] = useState(TURN_TIMEOUT_SECONDS);
-  const [settings, setSettings] = useState<GameSettings>(() => loadSettings());
+  const [settings] = useState<GameSettings>(() => loadSettings());
   const [profile, setProfile] = useState<PlayerProfile>(() => loadProfile());
   const mic = useVoiceMic();
   const meSpeaking = mic.speaking;
@@ -130,6 +132,28 @@ function GameContent() {
   const roomJoinedRef = useRef(false);
   const [roomAttempt, setRoomAttempt] = useState(0);
   const [viewProfile, setViewProfile] = useState<Player | null>(null);
+
+  // Mirrors `inLobby` so the SSE callback can read it without re-subscribing.
+  const inLobbyRef = useRef(inLobby);
+  useEffect(() => {
+    inLobbyRef.current = inLobby;
+  }, [inLobby]);
+
+  // Voice messages received from other players (via SSE / poll), deduped.
+  const [incomingVoice, setIncomingVoice] = useState<RoomVoiceMessage[]>([]);
+  const lastVoiceIdsRef = useRef<Set<string>>(new Set());
+  const ingestVoice = useCallback((messages: RoomVoiceMessage[] = []) => {
+    const fresh = messages.filter((m) => m.byDeviceId !== deviceId && !lastVoiceIdsRef.current.has(m.id));
+    if (fresh.length === 0) return;
+    fresh.forEach((m) => lastVoiceIdsRef.current.add(m.id));
+    setIncomingVoice((prev) => [...prev, ...fresh].slice(-12));
+  }, [deviceId]);
+
+  // 3-2-1-GO countdown shown when the match opens.
+  const [startCountdown, setStartCountdown] = useState(0);
+  const beginStartCountdown = useCallback(() => {
+    setStartCountdown(3);
+  }, []);
 
   // Browser back-button guard: warn before leaving an active match.
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
@@ -257,7 +281,28 @@ function GameContent() {
     void join();
   }, [mounted, mode, inLobby, isHost, roomCode, profile, deviceId, roomAttempt]);
 
-  // ---- Poll the room so new joiners / ready states appear live ----
+  // ---- Real-time push: subscribe to the room SSE stream ----
+  useEffect(() => {
+    if (!mounted || mode !== 'room' || roomError) return;
+    const unsubscribe = subscribeRoomStream(roomCode, (event) => {
+      if (event.type === 'state') {
+        // The host started the match — pull in the authoritative state and join the game.
+        if (event.status === 'PLAYING' && event.state && inLobbyRef.current) {
+          applyServerState(event.state);
+          setInLobby(false);
+          beginStartCountdown();
+          return;
+        }
+        if (!event.state) return;
+        applyServerState(event.state);
+      } else if (event.type === 'voice') {
+        ingestVoice(event.voiceMessages);
+      }
+    });
+    return unsubscribe;
+  }, [mounted, mode, roomCode, roomError, applyServerState, ingestVoice, beginStartCountdown]);
+
+  // ---- Lobby: slow poll as a safety net / for joiners on other instances ----
   useEffect(() => {
     if (!mounted || mode !== 'room' || !inLobby) return;
     const id = setInterval(() => {
@@ -272,28 +317,39 @@ function GameContent() {
                 if (!s.state) return;
                 applyServerState(s.state);
                 setInLobby(false);
+                beginStartCountdown();
               })
               .catch(() => {});
           }
         })
         .catch(() => {});
-    }, 2500);
+    }, 4000);
     return () => clearInterval(id);
-  }, [mounted, mode, inLobby, roomCode, applyServerState]);
+  }, [mounted, mode, inLobby, roomCode, applyServerState, beginStartCountdown]);
 
-  // ---- Online rooms: mirror the authoritative match state as it changes ----
+  // ---- Online rooms: slow poll fallback (SSE is the fast path) ----
   useEffect(() => {
     if (!mounted || mode !== 'room' || inLobby) return;
     const id = setInterval(() => {
       apiRoomState(roomCode)
         .then((s) => {
+          if (s.voiceMessages) ingestVoice(s.voiceMessages);
           if (!s.state || s.status !== 'PLAYING') return;
           applyServerState(s.state);
         })
         .catch(() => {});
-    }, 1200);
+    }, 4000);
     return () => clearInterval(id);
-  }, [mounted, mode, inLobby, roomCode, applyServerState]);
+  }, [mounted, mode, inLobby, roomCode, applyServerState, ingestVoice]);
+
+  // 3-2-1-GO start countdown ticker.
+  useEffect(() => {
+    if (startCountdown <= 0) return;
+    const t = setTimeout(() => {
+      setStartCountdown((c) => Math.max(0, c - 1));
+    }, 1000);
+    return () => clearTimeout(t);
+  }, [startCountdown]);
 
   // ---- Dice reveal gate: only show legal-move hints / auto-move AFTER the
   //      dice finishes its spinning animation (so the number is revealed first).
@@ -332,7 +388,7 @@ function GameContent() {
   // When they must move but nothing can move, pass automatically. Bots already
   // decide on their own, so this only ever touches the human turn.
   useEffect(() => {
-    if (!isMyTurn || !diceSettled || inLobby) return;
+    if (!isMyTurn || !diceSettled || inLobby || startCountdown > 0) return;
     if (gameState.status !== 'playing' || gameState.winner) return;
 
     if (legalMoves.length === 1) {
@@ -347,7 +403,7 @@ function GameContent() {
       }, 600);
       return () => clearTimeout(t);
     }
-  }, [isMyTurn, diceSettled, inLobby, legalMoves, gameState.status, gameState.winner, gameState.dice.mustMove, doAction]);
+  }, [isMyTurn, diceSettled, inLobby, startCountdown, legalMoves, gameState.status, gameState.winner, gameState.dice.mustMove, doAction]);
 
   // Finished-goti counters per color (shown on the mobile player boxes).
   const homeCounts = useMemo(() => {
@@ -411,11 +467,6 @@ function GameContent() {
     return () => clearTimeout(t);
   }, [mounted, storageKey]);
 
-  const handleSettingsChange = (next: GameSettings) => {
-    setSettings(next);
-    saveSettings(next);
-  };
-
   // ---- Persist game state whenever it changes while playing ----
   useEffect(() => {
     if (!mounted || inLobby || !saveInitialized) return;
@@ -457,7 +508,7 @@ function GameContent() {
 
   // ---- AI Bot Automatic Turn Logic ----
   useEffect(() => {
-    if (!mounted || inLobby || gameState.status !== 'playing' || gameState.winner) return;
+    if (!mounted || inLobby || startCountdown > 0 || gameState.status !== 'playing' || gameState.winner) return;
 
     if (currentPlayer.isBot) {
       const timer = setTimeout(() => {
@@ -476,11 +527,11 @@ function GameContent() {
 
       return () => clearTimeout(timer);
     }
-  }, [mounted, gameState, currentPlayer, inLobby, doAction]);
+  }, [mounted, gameState, currentPlayer, inLobby, startCountdown, doAction]);
 
   // ---- Auto-pass after showing the rolled dice when there are no legal moves ----
   useEffect(() => {
-    if (!mounted || inLobby || gameState.status !== 'playing' || gameState.winner) return;
+    if (!mounted || inLobby || startCountdown > 0 || gameState.status !== 'playing' || gameState.winner) return;
     if (mode === 'room' && !isMyTurn) return; // only the seat owner passes
     if (!gameState.dice.noLegalMove) return;
 
@@ -489,11 +540,11 @@ function GameContent() {
     }, 1600);
 
     return () => clearTimeout(timer);
-  }, [mounted, inLobby, mode, isMyTurn, gameState.dice.noLegalMove, gameState.status, gameState.winner, doAction]);
+  }, [mounted, inLobby, startCountdown, mode, isMyTurn, gameState.dice.noLegalMove, gameState.status, gameState.winner, doAction]);
 
   // ---- 60s Turn Timer (human turns only): auto roll + auto move ----
   useEffect(() => {
-    if (!mounted || inLobby || gameState.status !== 'playing' || gameState.winner) return;
+    if (!mounted || inLobby || startCountdown > 0 || gameState.status !== 'playing' || gameState.winner) return;
     if (currentPlayer.isBot) return;
 
     timerKeyRef.current += 1;
@@ -514,13 +565,13 @@ function GameContent() {
       clearTimeout(resetT);
       clearInterval(interval);
     };
-  }, [mounted, inLobby, gameState.status, gameState.winner, currentPlayer, gameState.dice.mustMove, gameState.dice.noLegalMove, doAction]);
+  }, [mounted, inLobby, startCountdown, gameState.status, gameState.winner, currentPlayer, gameState.dice.mustMove, gameState.dice.noLegalMove, doAction]);
 
   // When timer reaches 0, act on behalf of the human player — but never while
 // the dice is still spinning or before its result has been revealed.
   useEffect(() => {
     if (turnTimeLeft > 0) return;
-    if (!mounted || inLobby || gameState.status !== 'playing' || gameState.winner) return;
+    if (!mounted || inLobby || startCountdown > 0 || gameState.status !== 'playing' || gameState.winner) return;
     if (currentPlayer.isBot || gameState.dice.noLegalMove) return;
 
     // Time is up and a roll is expected — roll immediately.
@@ -541,7 +592,7 @@ function GameContent() {
     } else {
       doAction({ type: 'PASS_TURN' });
     }
-  }, [turnTimeLeft, diceSettled, mounted, inLobby, gameState, currentPlayer, doAction]);
+  }, [turnTimeLeft, diceSettled, mounted, inLobby, startCountdown, gameState, currentPlayer, doAction]);
 
   // Browser back-button guard: warn before leaving an active match.
   useEffect(() => {
@@ -574,19 +625,23 @@ function GameContent() {
   }
 
   const handleRollDice = () => {
+    if (startCountdown > 0) return;
     doAction({ type: 'ROLL_DICE' });
   };
 
   const handleSelectToken = (tokenId: string) => {
+    if (startCountdown > 0) return;
     soundEngine.playTokenMove();
     dispatch({ type: 'SELECT_TOKEN', targetTokenId: tokenId });
   };
 
   const handleUsePowerCard = (cardType: PowerCardType) => {
+    if (startCountdown > 0) return;
     doAction({ type: 'USE_POWER_CARD', cardType });
   };
 
   const handleSelectLuckyRoll = (value: number) => {
+    if (startCountdown > 0) return;
     doAction({ type: 'ROLL_DICE', overrideValue: value });
   };
 
@@ -621,6 +676,7 @@ function GameContent() {
           if (!res.state) return;
           applyServerState(res.state);
           setInLobby(false);
+          beginStartCountdown();
         })
         .catch((e) => setRoomError(e instanceof Error ? e.message : 'Could not start the game'));
       return;
@@ -629,6 +685,7 @@ function GameContent() {
     setPlayers(next);
     dispatch({ type: 'RESTORE_GAME', state: createInitialGameState(next, roomCode) });
     setInLobby(false);
+    beginStartCountdown();
   };
 
   const handleCharacterChange = async (characterId: PlayerColor) => {
@@ -698,7 +755,7 @@ function GameContent() {
     router.replace('/');
   };
 
-  const isTimerVisible = !inLobby && !currentPlayer.isBot && gameState.status === 'playing' && !gameState.winner;
+  const isTimerVisible = !inLobby && startCountdown === 0 && !currentPlayer.isBot && gameState.status === 'playing' && !gameState.winner;
   const activePlayer = gameState.players[gameState.currentTurnIndex];
   const activeColorStyle = activePlayer ? gameTheme.players[activePlayer.color] : gameTheme.players.red;
 
@@ -861,8 +918,6 @@ function GameContent() {
                     onToggleReady={handleToggleReady}
                     onStartGame={handleStartFromLobby}
                     onLeaveRoom={handleLeaveRoom}
-                    settings={settings}
-                    onSettingsChange={handleSettingsChange}
                     characterId={profile.characterId}
                     onCharacterChange={handleCharacterChange}
                     takenColors={
@@ -936,6 +991,23 @@ function GameContent() {
               <AudioSettings />
             </div>
           </header>
+
+          {/* 3-2-1-GO start countdown */}
+          {!inLobby && startCountdown > 0 && (
+            <div className="fixed inset-0 z-[90] bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center gap-3">
+              <motion.div
+                key={`count-${startCountdown}`}
+                initial={{ scale: 0.3, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                transition={{ type: 'spring', stiffness: 320, damping: 18 }}
+                className="text-8xl font-black text-white"
+                style={{ textShadow: `0 0 40px ${activeColorStyle.primary}aa` }}
+              >
+                {startCountdown}
+              </motion.div>
+              <div className="text-[11px] font-black uppercase tracking-[0.3em] text-slate-300">Get Ready</div>
+            </div>
+          )}
 
           {/* Game Stage — the board fills the whole stage; mobile info floats on top */}
           <div className="relative z-10 flex-1 min-h-0 min-w-0 w-full mx-auto flex items-stretch max-w-[1600px]">
@@ -1118,7 +1190,14 @@ function GameContent() {
                     onSpeakerToggle={handleSpeakerToggle}
                   />
                 </div>
-                <VoiceChat players={gameState.players} />
+                <VoiceChat
+                  players={gameState.players}
+                  roomMode={mode === 'room'}
+                  roomCode={mode === 'room' ? roomCode : undefined}
+                  deviceId={deviceId}
+                  incoming={incomingVoice}
+                  onIncomingHandled={() => setIncomingVoice([])}
+                />
               </div>
             </div>
           </footer>

@@ -1,5 +1,8 @@
 import { PlayerColor, Player, GameState } from '@/game/engine/types';
 import { GameAction } from '@/game/engine/reducer';
+import type { RoomStreamEvent, RoomVoiceMessage } from '@/lib/roomBus';
+
+export type { RoomStreamEvent, RoomVoiceMessage };
 
 export interface RoomMember {
   id: string;
@@ -106,14 +109,59 @@ export async function apiLeaveRoom(input: { code: string; deviceId: string }): P
 
 // ---- Online room match: authoritative game state ----
 
+export interface RoomVoiceInput {
+  phraseId?: string;
+  text: string;
+  language: string;
+  icon?: string;
+}
+
+/** Subscribe to real-time room pushes (SSE). Returns an unsubscribe function. */
+export function subscribeRoomStream(
+  code: string,
+  onEvent: (event: RoomStreamEvent) => void
+): () => void {
+  let source: EventSource | null = null;
+  try {
+    source = new EventSource(`/api/rooms/${encodeURIComponent(code)}/game/stream`);
+    source.onmessage = (e) => {
+      try {
+        const event = JSON.parse(e.data) as RoomStreamEvent;
+        onEvent(event);
+      } catch {
+        /* ignore malformed frames */
+      }
+    };
+  } catch {
+    /* EventSource unsupported — the polling fallback still covers it */
+  }
+  return () => source?.close();
+}
+
 export async function apiRoomState(code: string): Promise<{
   code: string;
   status: string;
   state: GameState | null;
+  voiceMessages?: RoomVoiceMessage[];
 }> {
   const res = await fetch(`/api/rooms/${encodeURIComponent(code)}/game`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Failed to load game');
+  return data;
+}
+
+export async function apiRoomVoice(
+  code: string,
+  deviceId: string,
+  voice: RoomVoiceInput
+): Promise<{ voiceMessages: RoomVoiceMessage[] }> {
+  const res = await fetch(`/api/rooms/${encodeURIComponent(code)}/game`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deviceId, voice }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Voice message failed');
   return data;
 }
 
