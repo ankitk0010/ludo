@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Copy, Check, UserPlus, Play, Bot, Lock, Shapes } from 'lucide-react';
+import { Copy, Check, UserPlus, Play, Bot, Lock, Shapes, Share2, Eye } from 'lucide-react';
 import { Player, PlayerColor } from '@/game/engine/types';
 import { GameSettings } from '@/game/settings';
 import { AvatarSelector } from '@/components/avatar/AvatarSelector';
@@ -12,7 +12,7 @@ interface LobbyRoomProps {
   roomCode: string;
   players: Player[];
   isHost: boolean;
-  onAddBot: () => void;
+  onAddBot?: () => void;
   onToggleReady: () => void;
   onStartGame: () => void;
   onLeaveRoom: () => void;
@@ -23,6 +23,12 @@ interface LobbyRoomProps {
   /** Colors already claimed by other human players (locked in the picker). */
   takenColors?: PlayerColor[];
   localPlayerId?: string;
+  /** Full invite URL — shows the share/invite button when provided. */
+  inviteLink?: string;
+  /** True when this is an online room (no bots allowed, show join hints). */
+  roomMode?: boolean;
+  /** Tap a filled slot to view that player's profile. */
+  onViewProfile?: (player: Player) => void;
 }
 
 export const LobbyRoom: React.FC<LobbyRoomProps> = ({
@@ -37,8 +43,12 @@ export const LobbyRoom: React.FC<LobbyRoomProps> = ({
   onCharacterChange,
   takenColors = [],
   localPlayerId = 'p1',
+  inviteLink,
+  roomMode = false,
+  onViewProfile,
 }) => {
   const [copied, setCopied] = useState(false);
+  const [shared, setShared] = useState(false);
   const myChar = getCharacter(characterId);
 
   const handleCopyCode = () => {
@@ -47,8 +57,25 @@ export const LobbyRoom: React.FC<LobbyRoomProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleShareInvite = async () => {
+    const link = inviteLink || `${window.location.origin}/game?mode=room&code=${roomCode}&host=false`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: 'Ludo Master — join my room', text: `Join my Ludo room: ${roomCode}`, url: link });
+        return;
+      }
+    } catch {
+      /* user cancelled */
+      return;
+    }
+    await navigator.clipboard.writeText(link);
+    setShared(true);
+    setTimeout(() => setShared(false), 2000);
+  };
+
   const colors: PlayerColor[] = ['red', 'green', 'yellow', 'blue'];
   const allReady = players.length >= 2 && players.every((p) => p.ready || p.isBot);
+  const readyCount = players.filter((p) => p.ready || p.isBot).length;
 
   return (
     <div className="w-full max-w-lg mx-auto bg-slate-900 border-2 border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
@@ -57,30 +84,51 @@ export const LobbyRoom: React.FC<LobbyRoomProps> = ({
         <div className="inline-flex items-center gap-2 bg-slate-950 px-4 py-1.5 rounded-full border border-slate-800 text-xs font-bold text-slate-300">
           <span>ROOM CODE:</span>
           <span className="text-amber-400 font-extrabold text-sm tracking-wider">{roomCode}</span>
-          <button onClick={handleCopyCode} className="text-slate-400 hover:text-white ml-1">
+          <button onClick={handleCopyCode} className="text-slate-400 hover:text-white ml-1" aria-label="Copy room code">
             {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
           </button>
         </div>
         <h2 className="text-2xl font-black text-white">GAME LOBBY</h2>
-        <p className="text-xs text-slate-400">Waiting for players to join (2 to 4 players)</p>
+        <p className="text-xs text-slate-400">
+          {roomMode
+            ? `Waiting for players to join (${players.length}/4 seats)`
+            : 'Waiting for players to join (2 to 4 players)'}
+        </p>
+
+        {/* Invite / share */}
+        {inviteLink && (
+          <button
+            onClick={handleShareInvite}
+            className={`w-full flex items-center justify-center gap-2 py-3 rounded-2xl font-black text-white text-sm tracking-wider shadow-lg transition-all active:scale-95 ${
+              shared
+                ? 'bg-emerald-600 shadow-emerald-600/30'
+                : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 shadow-purple-600/30'
+            }`}
+          >
+            {shared ? <Check className="w-5 h-5" /> : <Share2 className="w-5 h-5" />}
+            {shared ? 'INVITE LINK COPIED!' : 'SHARE INVITE LINK'}
+          </button>
+        )}
       </div>
 
       {/* Player Slots */}
       <div className="space-y-3">
-        {colors.map((color, idx) => {
-          const player = players[idx];
+        {colors.map((color) => {
+          const player = players.find((p) => p.color === color);
 
           return (
             <div
               key={color}
+              onClick={player && onViewProfile ? () => onViewProfile(player) : undefined}
+              title={player && onViewProfile ? 'View profile' : undefined}
               className={`flex items-center justify-between p-3.5 rounded-2xl border-2 transition-all ${
                 player
-                  ? 'bg-slate-950 border-slate-800'
+                  ? 'bg-slate-950 border-slate-800 cursor-pointer hover:border-slate-600 active:scale-[0.99]'
                   : 'bg-slate-950/40 border-dashed border-slate-800/80'
               }`}
             >
               {player ? (
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 min-w-0">
                   <div className="w-11 h-11 rounded-full shrink-0">
                     {player.avatarUrl ? (
                       <CharacterAvatar color={player.color} image={player.avatarUrl} className="w-11 h-11" />
@@ -90,16 +138,16 @@ export const LobbyRoom: React.FC<LobbyRoomProps> = ({
                       </div>
                     )}
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <div className="text-sm font-bold text-white flex items-center gap-1.5">
-                      <span>{player.name}</span>
+                      <span className="truncate">{player.name}</span>
                       {player.id === localPlayerId && (
-                        <span className="text-[9px] bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded font-extrabold">
+                        <span className="text-[9px] bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded font-extrabold shrink-0">
                           YOU
                         </span>
                       )}
                       {player.isBot && (
-                        <span className="text-[10px] bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5">
+                        <span className="text-[10px] bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-0.5 shrink-0">
                           <Bot className="w-3 h-3" /> BOT
                         </span>
                       )}
@@ -114,23 +162,41 @@ export const LobbyRoom: React.FC<LobbyRoomProps> = ({
                   <div className="w-10 h-10 rounded-full border-2 border-dashed border-slate-700 flex items-center justify-center text-xs">
                     +
                   </div>
-                  <span className="text-xs font-bold italic">Empty Slot</span>
+                  {roomMode && inviteLink ? (
+                    <button
+                      onClick={handleShareInvite}
+                      className="text-xs font-bold italic text-purple-300 hover:text-purple-200 transition-colors"
+                    >
+                      Tap invite to fill this slot →
+                    </button>
+                  ) : (
+                    <span className="text-xs font-bold italic">Empty Slot</span>
+                  )}
                 </div>
               )}
 
-              <div>
+              <div className="shrink-0 flex items-center gap-1.5">
                 {player ? (
-                  <span
-                    className={`text-xs font-black px-3 py-1 rounded-full ${
-                      player.ready || player.isBot
-                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                        : 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                    }`}
-                  >
-                    {player.ready || player.isBot ? 'READY' : 'WAITING'}
-                  </span>
+                  <>
+                    {onViewProfile && (
+                      <span className="w-7 h-7 rounded-full bg-slate-800/70 flex items-center justify-center" title="View profile">
+                        <Eye className="w-3 h-3 text-slate-400" />
+                      </span>
+                    )}
+                    <span
+                      className={`text-xs font-black px-3 py-1 rounded-full ${
+                        player.ready || player.isBot
+                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                          : 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                      }`}
+                    >
+                      {player.ready || player.isBot ? 'READY' : 'WAITING'}
+                    </span>
+                  </>
                 ) : (
-                  isHost && (
+                  isHost &&
+                  !roomMode &&
+                  onAddBot && (
                     <button
                       onClick={onAddBot}
                       className="px-3 py-1 rounded-full bg-purple-600/20 border border-purple-500/40 text-purple-300 text-xs font-bold hover:bg-purple-600/40 transition-colors flex items-center gap-1"
@@ -197,6 +263,14 @@ export const LobbyRoom: React.FC<LobbyRoomProps> = ({
           </button>
         )}
 
+        {isHost && !allReady && (
+          <p className="text-center text-[10px] font-bold text-slate-500">
+            {players.length < 2
+              ? 'Wait for at least 2 players to join before starting.'
+              : `Everyone must be READY (${readyCount}/${players.length}) before the game can start.`}
+          </p>
+        )}
+
         <button
           onClick={onLeaveRoom}
           className="w-full py-2.5 rounded-2xl bg-slate-800/80 hover:bg-slate-800 text-slate-400 text-xs font-bold transition-colors"
@@ -207,3 +281,5 @@ export const LobbyRoom: React.FC<LobbyRoomProps> = ({
     </div>
   );
 };
+
+export default LobbyRoom;

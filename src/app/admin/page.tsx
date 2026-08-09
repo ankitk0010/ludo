@@ -21,7 +21,7 @@ import { SfxAdminPanel } from '@/components/admin/SfxAdminPanel';
 import { CharacterAvatar } from '@/components/avatar/CharacterAvatar';
 import { isImageAvatar } from '@/game/avatars';
 import { PlayerColor } from '@/game/engine/types';
-import { gameTheme } from '@/theme/tokens';
+import { clearAuthSession } from '@/game/profile';
 import { apiLogout } from '@/lib/authClient';
 
 const TOKEN_KEY = 'ludo_auth_token_v1';
@@ -210,6 +210,8 @@ export default function AdminPage() {
     setAdmin(null);
     setPhase('login');
     setTab('overview');
+    // Wipe the shared game session/profile so no old player identity lingers.
+    clearAuthSession();
   };
 
   const runPlayerSearch = () => {
@@ -235,7 +237,7 @@ export default function AdminPage() {
 
   if (phase === 'login') {
     return (
-      <main className="min-h-[100dvh] bg-[#080d18] text-white flex items-center justify-center p-4 relative overflow-hidden">
+      <main className="min-h-[100dvh] bg-[#080d18] text-white flex items-center justify-center p-4 relative overflow-y-auto py-10">
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[700px] h-[360px] bg-purple-600/15 blur-[120px] rounded-full pointer-events-none" />
         <motion.div
           initial={{ opacity: 0, y: 20, scale: 0.98 }}
@@ -310,58 +312,61 @@ export default function AdminPage() {
   ];
 
   return (
-    <main className="min-h-[100dvh] bg-[#080d18] text-white overflow-y-auto">
+    <main className="h-[100dvh] bg-[#080d18] text-white overflow-y-auto overscroll-contain scroll-smooth">
       {/* Top bar */}
-      <header className="sticky top-0 z-30 bg-slate-950/90 backdrop-blur-md border-b border-slate-800">
-        <div className="mx-auto max-w-6xl px-4 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center text-lg shadow-lg border border-purple-300/40">
+      <header className="sticky top-0 z-30 bg-slate-950/85 backdrop-blur-xl border-b border-slate-800/80">
+        <div className="mx-auto max-w-6xl px-4 py-2.5 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="relative w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center text-lg shadow-lg border border-purple-300/40 shrink-0">
               🎲
+              <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-emerald-400 border-2 border-slate-950" />
             </div>
-            <div>
-              <h1 className="text-sm font-black leading-none">LUDO MASTER</h1>
+            <div className="min-w-0 leading-none">
+              <h1 className="text-[15px] font-black leading-none truncate">LUDO MASTER</h1>
               <span className="text-[9px] font-black uppercase tracking-widest text-purple-400">
                 Admin Dashboard
               </span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             {admin && (
-              <div className="hidden sm:flex items-center gap-2 pr-2">
-                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                  {admin.displayName || admin.username}
-                </span>
-                <span
-                  className="text-[9px] font-black px-2 py-0.5 rounded-full border"
-                  style={{
-                    color: gameTheme.players[admin.characterId as keyof typeof gameTheme.players]?.primary || '#a855f7',
-                    borderColor: 'rgba(168,85,247,0.4)',
-                    background: 'rgba(168,85,247,0.12)',
-                  }}
-                >
-                  ADMIN
-                </span>
+              <div className="flex items-center gap-2 pl-1">
+                <CharacterAvatar
+                  color={(admin.characterId as PlayerColor) || 'red'}
+                  image={isImageAvatar(admin.avatar) ? admin.avatar : undefined}
+                  className="w-8 h-8 hidden sm:flex"
+                />
+                <div className="hidden sm:block">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                    {admin.displayName || admin.username}
+                  </span>
+                  <span className="text-[8px] font-black px-2 py-0.5 rounded-full border border-purple-500/40 bg-purple-500/10 text-purple-300">
+                    ADMIN
+                  </span>
+                </div>
               </div>
             )}
             <button
               onClick={handleLogout}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-red-500/20 hover:text-red-300 text-xs font-black text-slate-300 transition-colors"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl bg-slate-800/80 hover:bg-red-500/20 hover:text-red-300 text-[11px] font-black text-slate-300 transition-colors active:scale-95"
+              aria-label="Log out"
             >
-              <LogOut className="w-3.5 h-3.5" /> Logout
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Logout</span>
             </button>
           </div>
         </div>
 
         {/* Tabs */}
-        <nav className="mx-auto max-w-6xl px-4 pb-2 flex gap-1.5 overflow-x-auto no-scrollbar">
+        <nav className="mx-auto max-w-6xl px-4 pb-2.5 flex gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar">
           {TABS.map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 sm:px-3.5 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all shrink-0 active:scale-95 ${
                 tab === t.id
-                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/30'
-                  : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-600/30 border border-purple-400/40'
+                  : 'bg-slate-900/80 text-slate-400 hover:text-white border border-slate-800'
               }`}
             >
               {t.icon} {t.label}
@@ -370,7 +375,7 @@ export default function AdminPage() {
         </nav>
       </header>
 
-      <div className="mx-auto max-w-6xl px-4 py-6">
+      <div className="mx-auto max-w-6xl px-4 py-6 pb-24">
         <AnimatePresence mode="wait">
           <motion.div
             key={tab}
@@ -386,7 +391,7 @@ export default function AdminPage() {
                   {statCards.map((s) => (
                     <div
                       key={s.label}
-                      className="relative overflow-hidden bg-slate-900/80 border border-slate-800 rounded-2xl p-4"
+                      className="relative overflow-hidden bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 hover:border-slate-600 rounded-2xl p-4 transition-colors"
                     >
                       <div
                         className="absolute -top-6 -right-6 w-16 h-16 rounded-full blur-2xl opacity-30 pointer-events-none"
@@ -467,7 +472,7 @@ export default function AdminPage() {
                 ) : players.length === 0 ? (
                   <p className="py-8 text-center text-[11px] text-slate-500 italic">No players found.</p>
                 ) : (
-                  <div className="overflow-x-auto">
+                  <div className="overflow-auto max-h-[58vh] rounded-xl border border-slate-800">
                     <table className="w-full text-left text-xs">
                       <thead>
                         <tr className="text-[9px] font-black uppercase tracking-widest text-slate-500 border-b border-slate-800">

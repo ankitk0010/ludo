@@ -29,8 +29,51 @@ model User {
   hostedRooms  GameRoom[]   @relation("HostUser")
   players      GamePlayer[]
   wonMatches   GameMatch[]  @relation("WinnerUser")
+  sentFriends  Friend[]     @relation("SentFriends")
+  receivedFriends Friend[]  @relation("ReceivedFriends")
+  sentRoomRequests     RoomRequest[] @relation("RoomRequestsSent")
+  receivedRoomRequests RoomRequest[] @relation("RoomRequestsReceived")
 
   @@map("users")
+}
+
+/// A two-way friendship edge between two accounts (only one row is kept).
+model Friend {
+  id        String   @id @default(cuid())
+  fromId    String
+  toId      String
+  from      User     @relation("SentFriends", fields: [fromId], references: [id], onDelete: Cascade)
+  to        User     @relation("ReceivedFriends", fields: [toId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([fromId, toId])
+  @@index([toId])
+  @@map("friends")
+}
+
+enum RoomRequestStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELLED
+}
+
+/// A join-room request sent from one friend to another ("invite me to your room").
+model RoomRequest {
+  id          String            @id @default(cuid())
+  roomId      String
+  room        GameRoom          @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  fromId      String
+  from        User              @relation("RoomRequestsSent", fields: [fromId], references: [id], onDelete: Cascade)
+  toId        String
+  to          User              @relation("RoomRequestsReceived", fields: [toId], references: [id], onDelete: Cascade)
+  status      RoomRequestStatus @default(PENDING)
+  createdAt   DateTime          @default(now())
+  respondedAt DateTime?
+
+  @@unique([roomId, toId, status])
+  @@index([toId, status])
+  @@map("room_requests")
 }
 
 model AuthSession {
@@ -76,6 +119,7 @@ model GameRoom {
 
   players GamePlayer[]
   matches GameMatch[]
+  requests RoomRequest[]
 
   @@map("game_rooms")
 }
@@ -90,10 +134,15 @@ model GamePlayer {
   color     String   // red, green, yellow, blue
   isBot     Boolean  @default(false)
   ready     Boolean  @default(false)
+  /// Stable browser id — lets the same player rejoin/update instead of duplicating.
+  deviceId  String?
+  /// Uploaded/preset avatar image (data URI or URL).
+  avatarUrl String?
   createdAt DateTime @default(now())
 
   moves GameMove[]
 
+  @@index([roomId, deviceId])
   @@map("game_players")
 }
 

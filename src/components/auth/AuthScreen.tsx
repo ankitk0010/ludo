@@ -118,7 +118,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initial, onAuthenticated
         initial={{ opacity: 0, y: 24, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ type: 'spring', stiffness: 260, damping: 24 }}
-        className="relative bg-slate-900/80 backdrop-blur-md border border-slate-700/70 rounded-[28px] p-5 sm:p-7 shadow-2xl overflow-hidden"
+        className="relative bg-slate-950/70 backdrop-blur-xl border border-slate-800 rounded-[28px] p-5 sm:p-7 shadow-2xl overflow-hidden"
       >
         <div className="absolute -top-16 left-1/2 -translate-x-1/2 w-[320px] h-[160px] bg-purple-500/20 blur-[80px] rounded-full pointer-events-none" />
 

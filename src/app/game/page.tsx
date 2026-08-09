@@ -19,11 +19,14 @@ import { DiceComponent } from '@/components/dice/DiceComponent';
 import { PowerCardDeck } from '@/components/powerCards/PowerCardDeck';
 import { VoiceChat } from '@/components/voice/VoiceChat';
 import { VoiceControls } from '@/components/voice/VoiceControls';
-import { PlayerStrip } from '@/components/game/PlayerStrip';
 import { PlayerCard } from '@/components/game/PlayerCard';
+import { LocalPlayerDock } from '@/components/game/LocalPlayerDock';
 import { Leaderboard } from '@/components/leaderboard/Leaderboard';
 import { VictoryModal } from '@/components/modals/VictoryModal';
 import { LobbyRoom } from '@/components/lobby/LobbyRoom';
+import { LobbySocial } from '@/components/lobby/LobbySocial';
+import { OpponentStrip } from '@/components/game/OpponentStrip';
+import { OpponentProfileSheet } from '@/components/profile/OpponentProfileSheet';
 import { soundEngine, refreshSfxOverrides } from '@/components/sound/soundEngine';
 import { AudioSettings } from '@/components/sound/AudioSettings';
 import { useVoiceMic } from '@/components/sound/useVoiceMic';
@@ -34,6 +37,15 @@ import { getCharacter } from '@/game/characters';
 import { loadProfile, saveProfile, profileName, PlayerProfile, getAuthToken } from '@/game/profile';
 import { loadSettings, saveSettings, GameSettings, BOARD_THEME_ACCENT } from '@/game/settings';
 import { apiUpdateProfile } from '@/lib/authClient';
+import {
+  RoomState,
+  getDeviceId,
+  apiCreateRoom,
+  apiJoinRoom,
+  apiFetchRoom,
+  apiSetReady,
+  apiLeaveRoom,
+} from '@/lib/roomClient';
 
 const TURN_TIMEOUT_SECONDS = 30;
 const STORAGE_PREFIX = 'ludo_save_v1_';
@@ -107,6 +119,14 @@ function GameContent() {
   const [diceSettled, setDiceSettled] = useState(false);
   const fitBoard = useFitBoard();
 
+  // ---- Online room sync (mode === 'room') ----
+  const deviceId = useMemo(getDeviceId, []);
+  const [roomState, setRoomState] = useState<RoomState | null>(null);
+  const [roomError, setRoomError] = useState<string | null>(null);
+  const roomJoinedRef = useRef(false);
+  const [roomAttempt, setRoomAttempt] = useState(0);
+  const [viewProfile, setViewProfile] = useState<Player | null>(null);
+
   // Browser back-button guard: warn before leaving an active match.
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
 
@@ -157,6 +177,70 @@ function GameContent() {
       };
     });
   }
+
+  // Build engine seats from a synced online room (all real human players).
+  function roomSeats(room: RoomState): Player[] {
+    return room.players.map((m) => ({
+      id: m.deviceId || m.id,
+      name: m.name,
+      color: m.color as PlayerColor,
+      isBot: false,
+      avatar: getCharacter(m.color as PlayerColor).emoji,
+      avatarUrl: m.avatarUrl || undefined,
+      ready: true,
+      connected: true,
+      wins: 0,
+      xp: 0,
+    }));
+  }
+
+  // ---- Join the online room once (host creates it, guest joins it) ----
+  useEffect(() => {
+    if (!mounted || mode !== 'room' || !inLobby) return;
+    if (roomJoinedRef.current) return;
+    roomJoinedRef.current = true;
+
+    const myName = profileName(profile) || (isHost ? 'Host' : 'Player');
+    const join = async () => {
+      try {
+        const res = isHost
+          ? await apiCreateRoom({
+              code: roomCode,
+              hostName: myName,
+              characterId: profile.characterId,
+              avatarUrl: profile.avatarUrl,
+              deviceId,
+            })
+          : await apiJoinRoom({
+              code: roomCode,
+              name: myName,
+              characterId: profile.characterId,
+              avatarUrl: profile.avatarUrl,
+              deviceId,
+            });
+        setRoomState(res.room);
+        setRoomError(null);
+      } catch (e) {
+        setRoomError(e instanceof Error ? e.message : 'Could not connect to the room');
+        roomJoinedRef.current = false; // allow retry
+      }
+    };
+    void join();
+  }, [mounted, mode, inLobby, isHost, roomCode, profile, deviceId, roomAttempt]);
+
+  // ---- Poll the room so new joiners / ready states appear live ----
+  useEffect(() => {
+    if (!mounted || mode !== 'room' || !inLobby) return;
+    const id = setInterval(() => {
+      apiFetchRoom(roomCode)
+        .then((d) => {
+          setRoomState(d.room);
+          setRoomError(null);
+        })
+        .catch(() => {});
+    }, 2500);
+    return () => clearInterval(id);
+  }, [mounted, mode, inLobby, roomCode]);
 
   // ---- Dice reveal gate: only show legal-move hints / auto-move AFTER the
   //      dice finishes its spinning animation (so the number is revealed first).
@@ -212,12 +296,44 @@ function GameContent() {
   }, [gameState.tokens]);
 
   // Which player is "speaking" right now (your mic dot).
-  const speakingSeat = meSpeaking ? profile.characterId : undefined;
+  const myPlayerId = mode === 'room' ? deviceId : 'p1';
+  const mySeat = gameState.players.find((p) => p.id === myPlayerId);
 
-  // Seat helpers: the local player always sits in their chosen color seat.
-  const localColor = profile.characterId;
-  const localPlayer = gameState.players.find((p) => p.id === 'p1') ?? gameState.players[0];
-  const opponents = gameState.players.filter((p) => p.id !== 'p1');
+  // Seat helpers: the local player sits in their own seat (chosen color in
+  // local modes, assigned seat in online rooms).
+  const localColor = mySeat?.color ?? profile.characterId;
+  const localPlayer = mySeat ?? gameState.players[0];
+  const speakingSeat = meSpeaking ? localColor : undefined;
+  const opponents = gameState.players.filter((p) => p.id !== myPlayerId);
+
+  // Room invite link used by the lobby share button and player profile sheets.
+  const roomInviteLink =
+    mode === 'room'
+      ? `${typeof window !== 'undefined' ? window.location.origin : ''}/game?mode=room&code=${roomCode}&host=false`
+      : undefined;
+  const openProfileSheet = (p: Player) => setViewProfile(p);
+
+  // Players shown in the lobby — the live synced roster for online rooms.
+  const lobbyPlayers: Player[] =
+    mode === 'room' && roomState
+      ? roomState.players.map((m) => {
+          const isMe = m.deviceId === deviceId;
+          return {
+            id: m.deviceId || m.id,
+            // The local player's own seat always shows the current profile
+            // (name/avatar may have just been edited in the profile sheet).
+            name: isMe ? profileName(profile) : m.name,
+            color: m.color as PlayerColor,
+            isBot: false,
+            avatar: getCharacter(m.color as PlayerColor).emoji,
+            avatarUrl: isMe ? profile.avatarUrl || undefined : m.avatarUrl || undefined,
+            ready: m.ready,
+            connected: true,
+            wins: 0,
+            xp: 0,
+          };
+        })
+      : players;
 
   // ---- Reconnect: offer to resume a saved in-progress game ----
   useEffect(() => {
@@ -440,21 +556,50 @@ function GameContent() {
 
   const handleStartFromLobby = () => {
     localStorage.removeItem(storageKey);
+    if (mode === 'room') {
+      // Online rooms never start with bots — require a synced real roster.
+      if (!roomState || roomState.players.length < 2) return;
+      const seats = roomSeats(roomState);
+      setPlayers(seats);
+      dispatch({ type: 'RESTORE_GAME', state: createInitialGameState(seats, roomCode) });
+      setInLobby(false);
+      return;
+    }
     const next = buildSeats(profile, defaultSeats);
     setPlayers(next);
     dispatch({ type: 'RESTORE_GAME', state: createInitialGameState(next, roomCode) });
     setInLobby(false);
   };
 
-  const handleCharacterChange = (characterId: PlayerColor) => {
+  const handleCharacterChange = async (characterId: PlayerColor) => {
     // A color already claimed by another human player is locked (room mode).
-    if (mode !== 'pass') {
+    if (mode === 'room' && roomState) {
+      const taken = roomState.players.filter((m) => m.deviceId !== deviceId).map((m) => m.color);
+      if (taken.includes(characterId)) return;
+    } else if (mode !== 'pass') {
       const taken = players.filter((p) => p.id !== 'p1' && !p.isBot).map((p) => p.color);
       if (taken.includes(characterId)) return;
     }
     const nextProfile = { ...profile, characterId };
     saveProfile(nextProfile);
     setProfile(nextProfile);
+
+    if (mode === 'room') {
+      // Rejoin with the new color so the server updates your seat (if free).
+      try {
+        const res = await apiJoinRoom({
+          code: roomCode,
+          name: profileName(nextProfile) || 'Player',
+          characterId,
+          avatarUrl: nextProfile.avatarUrl,
+          deviceId,
+        });
+        setRoomState(res.room);
+      } catch (e) {
+        setRoomError(e instanceof Error ? e.message : 'Could not update your color');
+      }
+      return;
+    }
     // Move YOU to that character's seat so the lobby shows your real color.
     setPlayers(buildSeats(nextProfile, defaultSeats));
   };
@@ -465,11 +610,25 @@ function GameContent() {
       setShowLeaveConfirm(true);
       return;
     }
+    if (mode === 'room' && roomState) {
+      void apiLeaveRoom({ code: roomCode, deviceId });
+    }
     localStorage.removeItem(storageKey);
     router.push('/');
   };
 
-  const handleToggleReady = () => {
+  const handleToggleReady = async () => {
+    if (mode === 'room' && roomState) {
+      const me = roomState.players.find((m) => m.deviceId === deviceId);
+      if (!me) return;
+      try {
+        const res = await apiSetReady({ code: roomCode, deviceId, ready: !me.ready });
+        setRoomState(res.room);
+      } catch (e) {
+        setRoomError(e instanceof Error ? e.message : 'Failed to update readiness');
+      }
+      return;
+    }
     setPlayers((ps) => ps.map((p) => (p.id === 'p1' ? { ...p, ready: !p.ready } : p)));
   };
 
@@ -486,7 +645,9 @@ function GameContent() {
   // Render the board immediately even before the first ResizeObserver tick,
   // then let the observer refine the exact size. Never a blank stage.
   const fallbackBoardSize =
-    typeof window !== 'undefined' ? Math.max(200, Math.min(window.innerWidth - 24, window.innerHeight - 320)) : 0;
+    typeof window !== 'undefined'
+      ? Math.max(200, Math.min(window.innerWidth - 24, window.innerHeight - (window.innerWidth < 640 ? 230 : 320)))
+      : 0;
   const boardRenderSize = fitBoard.boardSize > 0 ? fitBoard.boardSize : fallbackBoardSize;
 
   // Desktop profiles hug the board — each card sits beside its color zone,
@@ -505,7 +666,7 @@ function GameContent() {
       speakerMuted: isLocalSeat && speakerMuted,
       isLocal: isLocalSeat,
       avatarImage: isLocalSeat ? profile.avatarUrl : undefined,
-      onClick: isLocalSeat ? () => setShowProfileSheet(true) : undefined,
+      onClick: isLocalSeat ? () => setShowProfileSheet(true) : () => openProfileSheet(player),
     };
   };
   const redCard = seatCard('red');
@@ -597,25 +758,77 @@ function GameContent() {
                   </div>
                 </div>
               </header>
-              <LobbyRoom
-                roomCode={roomCode}
-                players={players}
-                isHost={isHost}
-                onAddBot={handleAddBotInLobby}
-                onToggleReady={handleToggleReady}
-                onStartGame={handleStartFromLobby}
-                onLeaveRoom={handleLeaveRoom}
-                settings={settings}
-                onSettingsChange={handleSettingsChange}
-                characterId={profile.characterId}
-                onCharacterChange={handleCharacterChange}
-                takenColors={
-                  mode !== 'pass'
-                    ? (players.filter((p) => p.id !== 'p1' && !p.isBot).map((p) => p.color) as PlayerColor[])
-                    : []
-                }
-                localPlayerId="p1"
-              />
+              {mode === 'room' && !roomState ? (
+                <div className="mx-2 bg-slate-900/80 border border-slate-800 rounded-3xl p-8 text-center shadow-2xl">
+                  {roomError ? (
+                    <div className="space-y-3">
+                      <div className="text-3xl">📡</div>
+                      <div className="text-sm font-extrabold text-red-300">Could not join room {roomCode}</div>
+                      <p className="text-[11px] text-slate-400 font-semibold">{roomError}</p>
+                      <button
+                        onClick={() => setRoomAttempt((a) => a + 1)}
+                        className="mt-1 px-5 py-2.5 rounded-2xl bg-purple-600 hover:bg-purple-500 text-white font-black text-xs tracking-wider"
+                      >
+                        RETRY
+                      </button>
+                      <button
+                        onClick={handleLeaveRoom}
+                        className="block mx-auto mt-2 text-[11px] font-bold text-slate-500 hover:text-white"
+                      >
+                        ← Back to home
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="mx-auto w-10 h-10 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
+                      <div className="text-sm font-extrabold text-white">Joining room {roomCode}…</div>
+                      <p className="text-[11px] text-slate-500 font-semibold">Syncing your profile with the lobby.</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
+                  {roomError && mode === 'room' && (
+                    <div className="mb-3 mx-2 px-3 py-2 rounded-xl bg-red-500/10 border border-red-500/40 text-[11px] font-bold text-red-300 text-center">
+                      ⚠️ {roomError}
+                    </div>
+                  )}
+                  <LobbyRoom
+                    roomCode={roomCode}
+                    players={lobbyPlayers}
+                    isHost={isHost}
+                    onAddBot={mode === 'room' ? undefined : handleAddBotInLobby}
+                    onToggleReady={handleToggleReady}
+                    onStartGame={handleStartFromLobby}
+                    onLeaveRoom={handleLeaveRoom}
+                    settings={settings}
+                    onSettingsChange={handleSettingsChange}
+                    characterId={profile.characterId}
+                    onCharacterChange={handleCharacterChange}
+                    takenColors={
+                      mode === 'room' && roomState
+                        ? (roomState.players.filter((m) => m.deviceId !== deviceId).map((m) => m.color) as PlayerColor[])
+                        : mode !== 'pass'
+                          ? (players.filter((p) => p.id !== 'p1' && !p.isBot).map((p) => p.color) as PlayerColor[])
+                          : []
+                    }
+                    localPlayerId={mode === 'room' ? deviceId : 'p1'}
+                    inviteLink={roomInviteLink}
+                    roomMode={mode === 'room'}
+                    onViewProfile={openProfileSheet}
+                  />
+                  {mode === 'room' && (
+                    <LobbySocial
+                      roomCode={roomCode}
+                      deviceId={deviceId}
+                      profile={profile}
+                      roomPlayerNames={roomState ? roomState.players.map((m) => m.name) : []}
+                      variant="full"
+                      className="mt-4"
+                    />
+                  )}
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -664,7 +877,7 @@ function GameContent() {
             </div>
           </header>
 
-          {/* Game Stage — board-centered composition with desktop flanks & mobile bands */}
+          {/* Game Stage — the board fills the whole stage; mobile info floats on top */}
           <div className="relative z-10 flex-1 min-h-0 min-w-0 w-full mx-auto flex items-stretch max-w-[1600px]">
             {/* Desktop: soft “table felt” backdrop that frames board + profiles */}
             <div
@@ -678,90 +891,77 @@ function GameContent() {
                 border: '1px solid rgba(148,163,184,0.08)',
               }}
             />
-            {/* Center column: opponents (mobile) / board / local player (mobile) */}
-            <div className="flex-1 min-h-0 min-w-0 flex flex-col items-center px-0.5 sm:px-1">
-              {/* Mobile only: opponents as compact chips */}
-              <div className="lg:hidden w-full max-w-[min(100%,560px)] pt-1">
-                <PlayerStrip
-                  players={opponents}
-                  currentColor={currentPlayer.color}
-                  speakingColor={speakingSeat}
-                  localColor={localColor}
-                  micOn={mic.micOn}
-                  speakerMuted={speakerMuted}
-                  justify="center"
-                  compact
-                  finishedCounts={homeCounts}
-                />
-              </div>
 
-              {/* Board — dynamically sized to the available stage (no wasted space) */}
-              <div ref={fitBoard.ref} className="flex-1 w-full flex items-center justify-center min-h-0">
-                {boardRenderSize > 0 && (
-                  <div
-                    className="relative"
-                    style={{ width: boardRenderSize, height: boardRenderSize }}
-                  >
-                    {/* Desktop profiles hug the board beside their color zones */}
-                    <div className="hidden lg:block absolute right-full top-0 bottom-0" style={{ width: 232, marginRight: 14 }}>
-                      {redCard && (
-                        <div className="absolute right-0 -translate-y-1/2 w-full" style={{ top: '20%' }}>
-                          <PlayerCard {...redCard} />
-                        </div>
-                      )}
-                      {blueCard && (
-                        <div className="absolute right-0 -translate-y-1/2 w-full" style={{ top: '80%' }}>
-                          <PlayerCard {...blueCard} />
-                        </div>
-                      )}
-                    </div>
+            {/* Board stage — board sized to the full stage on every viewport */}
+            <div ref={fitBoard.ref} className="relative flex-1 min-h-0 min-w-0 w-full flex items-center justify-center">
+              {boardRenderSize > 0 && (
+                <div className="relative" style={{ width: boardRenderSize, height: boardRenderSize }}>
+                  {/* Desktop profiles hug the board beside their color zones */}
+                  <div className="hidden lg:block absolute right-full top-0 bottom-0" style={{ width: 232, marginRight: 14 }}>
+                    {redCard && (
+                      <div className="absolute right-0 -translate-y-1/2 w-full" style={{ top: '20%' }}>
+                        <PlayerCard {...redCard} />
+                      </div>
+                    )}
+                    {blueCard && (
+                      <div className="absolute right-0 -translate-y-1/2 w-full" style={{ top: '80%' }}>
+                        <PlayerCard {...blueCard} />
+                      </div>
+                    )}
+                  </div>
 
-                    <div className="hidden lg:block absolute left-full top-0 bottom-0" style={{ width: 232, marginLeft: 14 }}>
-                      {greenCard && (
-                        <div className="absolute left-0 -translate-y-1/2 w-full" style={{ top: '20%' }}>
-                          <PlayerCard {...greenCard} />
-                        </div>
-                      )}
-                      {yellowCard && (
-                        <div className="absolute left-0 -translate-y-1/2 w-full" style={{ top: '80%' }}>
-                          <PlayerCard {...yellowCard} />
-                        </div>
-                      )}
-                    </div>
+                  <div className="hidden lg:block absolute left-full top-0 bottom-0" style={{ width: 232, marginLeft: 14 }}>
+                    {greenCard && (
+                      <div className="absolute left-0 -translate-y-1/2 w-full" style={{ top: '20%' }}>
+                        <PlayerCard {...greenCard} />
+                      </div>
+                    )}
+                    {yellowCard && (
+                      <div className="absolute left-0 -translate-y-1/2 w-full" style={{ top: '80%' }}>
+                        <PlayerCard {...yellowCard} />
+                      </div>
+                    )}
+                  </div>
 
-                    <LudoBoard
-                      gameState={gameState}
-                      legalMoves={visibleLegalMoves}
-                      onSelectToken={handleSelectToken}
-                      gotiShape={settings.gotiShape}
-                      theme={settings.theme}
+                  <LudoBoard
+                    gameState={gameState}
+                    legalMoves={visibleLegalMoves}
+                    onSelectToken={handleSelectToken}
+                    gotiShape={settings.gotiShape}
+                    theme={settings.theme}
+                  />
+                </div>
+              )}
+
+              {/* Mobile overlay: opponents — scrollable, non-collapsing chips you can tap to view the profile */}
+              <div className="lg:hidden absolute top-1.5 inset-x-1 flex justify-center z-20">
+                {opponents.length > 0 && (
+                  <div className="w-full max-w-[min(100%,520px)] rounded-2xl border border-white/10 bg-slate-950/70 backdrop-blur-md px-1 py-1 shadow-lg">
+                    <OpponentStrip
+                      players={opponents}
+                      currentColor={currentPlayer.color}
+                      speakingColor={speakingSeat}
+                      finishedCounts={homeCounts}
+                      onSelect={openProfileSheet}
                     />
                   </div>
                 )}
               </div>
 
-              {/* Mobile only: local player + voice controls */}
-              <div className="lg:hidden w-full max-w-[min(100%,560px)] pb-1">
-                <div className="flex items-center gap-1.5">
-<PlayerCard
+              {/* Mobile overlay: local player dock — compact profile + voice, floats over the board */}
+              <div className="lg:hidden absolute bottom-1.5 inset-x-2 flex justify-center z-20">
+                <LocalPlayerDock
                   player={localPlayer}
                   currentColor={currentPlayer.color}
                   speakingColor={speakingSeat}
                   homeCount={homeCounts[localPlayer.color] ?? 0}
-                  micOn={mic.micOn}
+                  mic={mic}
                   speakerMuted={speakerMuted}
-                  isLocal
+                  onSpeakerToggle={handleSpeakerToggle}
                   avatarImage={profile.avatarUrl}
-                  onClick={() => setShowProfileSheet(true)}
-                  className="flex-1 min-w-0"
+                  onOpenProfile={() => setShowProfileSheet(true)}
+                  className="w-full max-w-[min(100%,460px)]"
                 />
-                  <VoiceControls
-                    mic={mic}
-                    speakerMuted={speakerMuted}
-                    onSpeakerToggle={handleSpeakerToggle}
-                    className="flex-shrink-0"
-                  />
-                </div>
               </div>
             </div>
           </div>
@@ -805,7 +1005,7 @@ function GameContent() {
               {/* Dice pod — compact, primary and connected to the active player */}
               <div className="flex-shrink-0 flex flex-col items-center gap-1">
                 <div
-                  className="relative rounded-xl px-1.5 py-1 sm:px-2 sm:py-1.5 border flex items-center justify-center"
+                  className="relative rounded-xl px-1 py-0.5 sm:px-2 sm:py-1.5 border flex items-center justify-center"
                   style={{
                     background: `radial-gradient(130% 150% at 50% 0%, ${activeColorStyle.primary}30 0%, rgba(9,13,26,0.96) 80%)`,
                     borderColor: `${activeColorStyle.primary}50`,
@@ -816,7 +1016,7 @@ function GameContent() {
                     className="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full blur-lg pointer-events-none"
                     style={{ background: `${activeColorStyle.primary}55` }}
                   />
-                  <div className="scale-90 origin-center sm:scale-[0.85]">
+                  <div className="scale-[0.66] origin-center sm:scale-[0.85]">
                     <DiceComponent
                       diceState={gameState.dice}
                       activeColor={currentPlayer.color}
@@ -989,6 +1189,19 @@ function GameContent() {
           </AnimatePresence>
         </>
       )}
+
+      {/* View-other-profiles sheet — works from the lobby and in-game opponent chips */}
+      <OpponentProfileSheet
+        open={!!viewProfile}
+        player={viewProfile}
+        onClose={() => setViewProfile(null)}
+        inviteLink={roomInviteLink}
+        roomCode={mode === 'room' ? roomCode : undefined}
+        ownName={profileName(profile)}
+        homeCount={viewProfile ? homeCounts[viewProfile.color] ?? 0 : 0}
+        localPlay={mode !== 'room'}
+        friendable={mode === 'room'}
+      />
     </main>
   );
 }
