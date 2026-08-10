@@ -57,6 +57,51 @@ import {
 const TURN_TIMEOUT_SECONDS = 30;
 const STORAGE_PREFIX = 'ludo_save_v1_';
 
+let sharedAudioCtx: AudioContext | null = null;
+function getSharedAudioContext(): AudioContext {
+  if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
+    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    sharedAudioCtx = new AudioContextClass();
+  }
+  if (sharedAudioCtx.state === 'suspended') {
+    void sharedAudioCtx.resume();
+  }
+  return sharedAudioCtx;
+}
+
+function playLiveAudioChunk(base64: string, mimeType: string) {
+  try {
+    const ctx = getSharedAudioContext();
+    const parts = mimeType.split('/');
+    const sampleRate = parts[0] === 'pcm' && parts[1] ? parseInt(parts[1], 10) : 44100;
+
+    const binaryStr = atob(base64);
+    const len = binaryStr.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryStr.charCodeAt(i);
+    }
+    const int16 = new Int16Array(bytes.buffer);
+    const float32 = new Float32Array(int16.length);
+    for (let i = 0; i < int16.length; i++) {
+      float32[i] = int16[i] < 0 ? int16[i] / 32768 : int16[i] / 32767;
+    }
+
+    const buffer = ctx.createBuffer(1, float32.length, sampleRate);
+    buffer.getChannelData(0).set(float32);
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    source.start(0);
+  } catch {
+    try {
+      const audio = new Audio(`data:${mimeType};base64,${base64}`);
+      void audio.play();
+    } catch {}
+  }
+}
+
 /*
  * Dynamically sizes the square Ludo board to fill the available stage:
  * boardSize = min(availableWidth, availableHeight) so no empty space is left
@@ -248,9 +293,12 @@ function GameContent() {
   // the action to the server asynchronously.
   const doAction = useCallback(
     (action: GameAction) => {
-      dispatch(action);
-
       if (mode === 'room' && !inLobby) {
+        // Optimistically dispatch token selection & power card moves locally so the goti moves in 0ms.
+        // For ROLL_DICE, let the authoritative server roll the number so all room members receive the same dice value.
+        if (action.type !== 'ROLL_DICE') {
+          dispatch(action);
+        }
         apiRoomAction(roomCode, deviceId, action)
           .then((res) => {
             if (!res.state) return;
@@ -263,7 +311,9 @@ function GameContent() {
               })
               .catch(() => {});
           });
+        return;
       }
+      dispatch(action);
     },
     [mode, inLobby, roomCode, deviceId, applyServerState]
   );
@@ -324,11 +374,7 @@ function GameContent() {
           setRemoteSpeakingColor(chunk.byColor);
           if (remoteSpeakingTimerRef.current) clearTimeout(remoteSpeakingTimerRef.current);
           remoteSpeakingTimerRef.current = setTimeout(() => setRemoteSpeakingColor(null), 1200);
-
-          try {
-            const audio = new Audio(`data:${chunk.mimeType};base64,${chunk.audioBase64}`);
-            audio.play().catch(() => {});
-          } catch {}
+          playLiveAudioChunk(chunk.audioBase64, chunk.mimeType);
         }
       }
     });
@@ -636,6 +682,12 @@ function GameContent() {
       window.history.pushState({ ludoTrap: true }, '');
     };
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (mode === 'room' && roomCode && deviceId) {
+        try {
+          const blob = new Blob([JSON.stringify({ code: roomCode, deviceId })], { type: 'application/json' });
+          navigator.sendBeacon('/api/rooms/leave', blob);
+        } catch {}
+      }
       if (!inLobby) {
         e.preventDefault();
         e.returnValue = '';
@@ -647,7 +699,7 @@ function GameContent() {
       window.removeEventListener('popstate', onPop);
       window.removeEventListener('beforeunload', onBeforeUnload);
     };
-  }, [inLobby]);
+  }, [inLobby, mode, roomCode, deviceId]);
 
   if (!mounted) {
     return (
@@ -665,7 +717,7 @@ function GameContent() {
   const handleSelectToken = (tokenId: string) => {
     if (startCountdown > 0) return;
     soundEngine.playTokenMove();
-    dispatch({ type: 'SELECT_TOKEN', targetTokenId: tokenId });
+    doAction({ type: 'SELECT_TOKEN', targetTokenId: tokenId });
   };
 
   const handleUsePowerCard = (cardType: PowerCardType) => {

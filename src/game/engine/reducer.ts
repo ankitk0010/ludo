@@ -116,9 +116,18 @@ export function advanceTurn(state: GameState, extraTurn = false, logMessage?: st
     };
   }
 
-  const nextTurnIndex = (state.currentTurnIndex + 1) % state.players.length;
-  const nextPlayer = state.players[nextTurnIndex];
+  let nextTurnIndex = (state.currentTurnIndex + 1) % state.players.length;
+  // Skip disconnected players if there are connected players left
+  const hasConnected = state.players.some((p) => p.connected);
+  if (hasConnected) {
+    let attempts = 0;
+    while (!state.players[nextTurnIndex].connected && attempts < state.players.length) {
+      nextTurnIndex = (nextTurnIndex + 1) % state.players.length;
+      attempts++;
+    }
+  }
 
+  const nextPlayer = state.players[nextTurnIndex];
   logs.push(`It is now ${nextPlayer.name}'s (${nextPlayer.color.toUpperCase()}) turn.`);
 
   return {
