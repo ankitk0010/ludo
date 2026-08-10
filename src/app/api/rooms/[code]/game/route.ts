@@ -17,7 +17,14 @@ const CACHE_TTL_MS = 4000;
  * both the cache and the DB. A short TTL keeps the cache in sync if a room is
  * deleted elsewhere.
  */
-import { getCachedRoom, setCachedRoom, invalidateRoomCache, RoomCacheEntry } from '@/lib/roomCache';
+import {
+  getCachedRoom,
+  setCachedRoom,
+  invalidateRoomCache,
+  touchPlayerPresence,
+  checkRoomPresenceAndDisconnects,
+  RoomCacheEntry,
+} from '@/lib/roomCache';
 
 async function loadRoom(code: string): Promise<RoomCacheEntry | null> {
   const cached = getCachedRoom(code, CACHE_TTL_MS);
@@ -41,13 +48,18 @@ async function loadRoom(code: string): Promise<RoomCacheEntry | null> {
 
 /** GET /api/rooms/[code]/game — authoritative room-match state + voice inbox. */
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ code: string }> }
 ) {
   try {
     const { code } = await params;
     const key = code.toUpperCase();
-    const entry = await loadRoom(key);
+    const url = new URL(request.url);
+    const deviceId = url.searchParams.get('deviceId');
+    if (deviceId) {
+      touchPlayerPresence(key, deviceId);
+    }
+    const entry = (await checkRoomPresenceAndDisconnects(key)) || (await loadRoom(key));
     if (!entry) return NextResponse.json({ error: 'Room not found' }, { status: 404 });
     return NextResponse.json({
       code: key,
@@ -78,7 +90,8 @@ export async function POST(
     const deviceId = typeof body.deviceId === 'string' ? body.deviceId.slice(0, 64) : null;
     if (!deviceId) return NextResponse.json({ error: 'Missing device id' }, { status: 400 });
 
-    const entry = await loadRoom(key);
+    touchPlayerPresence(key, deviceId);
+    let entry = (await checkRoomPresenceAndDisconnects(key)) || (await loadRoom(key));
     if (!entry) return NextResponse.json({ error: 'Room not found' }, { status: 404 });
 
     // ---- Live Microphone Voice Stream Relay ----

@@ -138,13 +138,14 @@ export function subscribeRoomStream(
   return () => source?.close();
 }
 
-export async function apiRoomState(code: string): Promise<{
+export async function apiRoomState(code: string, deviceId?: string): Promise<{
   code: string;
   status: string;
   state: GameState | null;
   voiceMessages?: RoomVoiceMessage[];
 }> {
-  const res = await fetch(`/api/rooms/${encodeURIComponent(code)}/game`);
+  const query = deviceId ? `?deviceId=${encodeURIComponent(deviceId)}` : '';
+  const res = await fetch(`/api/rooms/${encodeURIComponent(code)}/game${query}`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Failed to load game');
   return data;
@@ -180,9 +181,9 @@ export async function apiSendLiveVoice(
 
 export async function apiPingRoom(): Promise<number> {
   const start = typeof performance !== 'undefined' ? performance.now() : Date.now();
-  await fetch('/api/rooms/ping', { cache: 'no-store' }).catch(() => {});
+  await fetch('/api/rooms/ping', { method: 'HEAD', cache: 'no-store' }).catch(() => {});
   const end = typeof performance !== 'undefined' ? performance.now() : Date.now();
-  return Math.round(end - start);
+  return Math.max(2, Math.round(end - start));
 }
 
 export async function apiRoomStart(
