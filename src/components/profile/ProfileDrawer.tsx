@@ -2,22 +2,19 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Trophy, Gamepad2, Zap, Settings, LogOut, Pencil, Mic, MicOff, Loader, Mail } from 'lucide-react';
+import { X, Trophy, Gamepad2, Zap, Settings, LogOut, Pencil, Loader, Mail } from 'lucide-react';
 import { PlayerProfile, profileName } from '@/game/profile';
 import { CharacterAvatar } from '@/components/avatar/CharacterAvatar';
 import { PlayerColor } from '@/game/engine/types';
 import { PRESET_AVATARS } from '@/game/avatars';
 import { gameTheme } from '@/theme/tokens';
 import { soundEngine } from '@/components/sound/soundEngine';
-import { useVoiceMic, VoiceMicApi } from '@/components/sound/useVoiceMic';
 
 interface ProfileDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   username: string;
   profile?: PlayerProfile;
-  /** Shared mic state — pass it so the sheet reflects the in-game mic. */
-  mic?: VoiceMicApi;
   onUpdateProfile?: (profile: PlayerProfile) => void;
   onLogout?: () => void;
 }
@@ -31,7 +28,6 @@ export const ProfileDrawer: React.FC<ProfileDrawerProps> = ({
   onClose,
   username,
   profile,
-  mic: micProp,
   onUpdateProfile,
   onLogout,
 }) => {
@@ -47,10 +43,6 @@ export const ProfileDrawer: React.FC<ProfileDrawerProps> = ({
     reader.onload = () => setAvatarImage(String(reader.result || ''));
     reader.readAsDataURL(file);
   };
-
-  // When a shared mic is handed in (in-game), drive it; otherwise own one here.
-  const internalMic = useVoiceMic();
-  const { micOn, micBusy, micError, speaking, toggleMic } = micProp ?? internalMic;
 
   const charColor = profile?.characterId || avatar;
   const charStyle = gameTheme.players[charColor];
@@ -298,69 +290,6 @@ export const ProfileDrawer: React.FC<ProfileDrawerProps> = ({
                   </motion.div>
                 )}
               </AnimatePresence>
-            </div>
-
-            {/* Microphone / voice */}
-            <div className={`mt-4 p-4 rounded-2xl border transition-colors ${micOn ? 'bg-emerald-500/10 border-emerald-500/40' : 'bg-slate-950/60 border-slate-800'}`}>
-              <div className="flex items-center justify-between mb-3">
-                <h5 className="text-xs font-black uppercase tracking-wider text-slate-200 flex items-center gap-1.5">
-                  <Mic className="w-4 h-4 text-emerald-400" /> Voice chat
-                </h5>
-                <button
-                  onClick={toggleMic}
-                  disabled={micBusy}
-                  className={`relative w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg ${
-                    micBusy
-                      ? 'bg-slate-700 text-slate-400'
-                      : micOn
-                        ? 'bg-emerald-500 text-white shadow-emerald-500/40'
-                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                  }`}
-                  aria-label={micOn ? 'Turn mic off' : 'Turn mic on'}
-                >
-                  {micBusy ? <Loader className="w-5 h-5 animate-spin" /> : micOn ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
-                  {micOn && (
-                    <motion.span
-                      animate={{ scale: speaking ? [1, 1.6, 1] : 1, opacity: speaking ? [1, 0.4, 1] : 1 }}
-                      transition={{ repeat: Infinity, duration: 0.9 }}
-                      className={`absolute -top-1 -right-1 w-3 h-3 rounded-full border-2 border-slate-950 ${speaking ? 'bg-emerald-400' : 'bg-white/60'}`}
-                    />
-                  )}
-                </button>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <div className="flex-1">
-                  <div className={`text-sm font-extrabold ${micOn ? 'text-white' : 'text-slate-400'}`}>
-                    {micOn ? (speaking ? 'You are speaking' : 'Listening…') : 'Mic is off'}
-                  </div>
-                  <div className="text-[10px] text-slate-500">
-                    {micOn
-                      ? speaking
-                        ? 'Everyone can see you talking'
-                        : 'Tap the mic and say something'
-                      : 'Tap the mic button to start speaking'}
-                  </div>
-                </div>
-              </div>
-
-              {/* Live voice level bars */}
-              {micOn && (
-                <div className="flex items-center gap-1 h-6 mt-3">
-                  {Array.from({ length: 18 }).map((_, i) => (
-                    <div
-                      key={i}
-                      className="flex-1 rounded-full transition-all"
-                      style={{
-                        height: speaking ? `${30 + Math.abs(Math.sin(i * 0.9)) * 60}%` : '18%',
-                        background: speaking ? '#10b981' : '#334155',
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
-
-              {micError && <div className="text-[10px] text-red-400 font-bold mt-2">{micError}</div>}
             </div>
 
             {/* Footer actions */}

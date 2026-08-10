@@ -2,11 +2,10 @@
 
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Mic, MicOff, Volume2, VolumeX, AlertTriangle } from 'lucide-react';
+import { Volume2, VolumeX } from 'lucide-react';
 import { Player } from '@/game/engine/types';
 import { gameTheme } from '@/theme/tokens';
 import { CharacterAvatar } from '@/components/avatar/CharacterAvatar';
-import { VoiceMicApi } from '@/components/sound/useVoiceMic';
 
 interface LocalPlayerDockProps {
   player: Player;
@@ -15,7 +14,6 @@ interface LocalPlayerDockProps {
   speakingColor?: string;
   /** Finished gotis for this player. */
   homeCount?: number;
-  mic?: VoiceMicApi;
   speakerMuted: boolean;
   onSpeakerToggle: () => void;
   /** Optional uploaded/preset avatar image for this player. */
@@ -35,7 +33,6 @@ export const LocalPlayerDock: React.FC<LocalPlayerDockProps> = ({
   currentColor,
   speakingColor,
   homeCount = 0,
-  mic,
   speakerMuted,
   onSpeakerToggle,
   avatarImage,
@@ -46,7 +43,6 @@ export const LocalPlayerDock: React.FC<LocalPlayerDockProps> = ({
   const isSpeaking = !speakerMuted && speakingColor === p.color;
   const style = gameTheme.players[p.color];
   const shortName = p.name.split(' (')[0];
-  const { micOn, micBusy, micError, toggleMic } = mic || { micOn: false, micBusy: false, micError: null, toggleMic: () => {} };
 
   return (
     <div
@@ -112,50 +108,8 @@ export const LocalPlayerDock: React.FC<LocalPlayerDockProps> = ({
         </div>
       </div>
 
-      {/* Voice controls — compact row embedded in the dock */}
+      {/* Sound controls — speaker toggle embedded in the dock */}
       <div className="flex items-center gap-1 shrink-0">
-        {/* Live mic equalizer */}
-        {micOn && (
-          <div className="flex items-end gap-[2px] h-4 mr-0.5">
-            {[0, 1, 2, 3].map((i) => (
-              <motion.span
-                key={i}
-                animate={mic?.speaking ? { height: ['35%', '100%', '35%'] } : { height: '28%' }}
-                transition={{ repeat: Infinity, duration: 0.7, delay: i * 0.09 }}
-                className="w-[3px] rounded-full"
-                style={{ background: style.primary, height: '28%' }}
-              />
-            ))}
-          </div>
-        )}
-
-        <motion.button
-          whileTap={{ scale: 0.9 }}
-          onClick={toggleMic}
-          disabled={micBusy}
-          aria-label={micOn ? 'Turn mic off' : 'Turn mic on'}
-          className={`relative w-9 h-9 rounded-full flex items-center justify-center border transition-colors ${
-            micError
-              ? 'bg-red-500/15 text-red-400 border-red-500/50'
-              : micBusy
-                ? 'bg-slate-800 text-slate-400 border-slate-700'
-                : micOn
-                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-                  : 'bg-slate-800/90 text-slate-300 border-slate-700'
-          }`}
-        >
-          {micBusy ? (
-            <span className="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
-          ) : micOn ? (
-            <Mic className="w-4 h-4" />
-          ) : (
-            <MicOff className="w-4 h-4" />
-          )}
-          {micError && !micBusy && (
-            <AlertTriangle className="w-2.5 h-2.5 absolute top-0.5 right-0.5 text-red-400" />
-          )}
-        </motion.button>
-
         <motion.button
           whileTap={{ scale: 0.9 }}
           onClick={onSpeakerToggle}
