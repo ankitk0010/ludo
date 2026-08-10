@@ -264,6 +264,10 @@ export const OpponentProfileSheet: React.FC<OpponentProfileSheetProps> = ({
                     <span className="text-[9px] font-bold text-amber-300 flex items-center gap-1">
                       <Users className="w-3 h-3" /> Same device
                     </span>
+                  ) : player.connected === false ? (
+                    <span className="text-[9px] font-bold text-red-400 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-500" /> Offline
+                    </span>
                   ) : (
                     <span className="text-[9px] font-bold text-emerald-400 flex items-center gap-1">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Online
@@ -296,11 +300,11 @@ export const OpponentProfileSheet: React.FC<OpponentProfileSheetProps> = ({
               <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800 text-center">
                 <span
                   className={`w-3.5 h-3.5 rounded-full mx-auto ${
-                    isBot ? 'bg-slate-500' : localPlay ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'
+                    isBot ? 'bg-slate-500' : localPlay ? 'bg-amber-400' : player.connected === false ? 'bg-red-500' : 'bg-emerald-400 animate-pulse'
                   }`}
                 />
                 <div className="text-sm font-extrabold text-white mt-1.5">
-                  {isBot ? 'BOT' : localPlay ? 'LOCAL' : 'ONLINE'}
+                  {isBot ? 'BOT' : localPlay ? 'LOCAL' : player.connected === false ? 'OFFLINE' : 'ONLINE'}
                 </div>
                 <div className="text-[8px] font-black uppercase tracking-wide text-slate-500">Status</div>
               </div>

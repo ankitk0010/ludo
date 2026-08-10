@@ -81,6 +81,12 @@ export const VictoryModal: React.FC<VictoryModalProps> = ({
           <p className="text-lg font-bold text-white mt-1">
             {winner?.name || winnerColor.toUpperCase()} WINS THE MATCH!
           </p>
+          {players.filter((p) => p.color !== winnerColor).length > 0 &&
+            players.filter((p) => p.color !== winnerColor).every((p) => p.connected === false) && (
+              <p className="text-xs font-extrabold text-amber-300 bg-amber-500/15 border border-amber-500/30 px-3 py-1.5 rounded-xl mt-2">
+                ⚡ Opponent(s) left the room — Victory awarded!
+              </p>
+            )}
           {winner && (
             <div
               className="mt-1.5 inline-block text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border"

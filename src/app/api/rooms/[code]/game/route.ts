@@ -17,32 +17,25 @@ const CACHE_TTL_MS = 4000;
  * both the cache and the DB. A short TTL keeps the cache in sync if a room is
  * deleted elsewhere.
  */
-interface RoomCache {
-  id: string;
-  status: string;
-  state: GameState | null;
-  voiceMessages: RoomVoiceMessage[];
-  at: number;
-}
-const roomCache = new Map<string, RoomCache>();
+import { getCachedRoom, setCachedRoom, invalidateRoomCache, RoomCacheEntry } from '@/lib/roomCache';
 
-async function loadRoom(code: string): Promise<RoomCache | null> {
-  const cached = roomCache.get(code);
-  if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached;
+async function loadRoom(code: string): Promise<RoomCacheEntry | null> {
+  const cached = getCachedRoom(code, CACHE_TTL_MS);
+  if (cached) return cached;
 
   const room = await prisma.gameRoom.findUnique({ where: { code } });
   if (!room) {
-    roomCache.delete(code);
+    invalidateRoomCache(code);
     return null;
   }
-  const entry: RoomCache = {
+  const entry: RoomCacheEntry = {
     id: room.id,
     status: room.status,
     state: room.state as unknown as GameState | null,
     voiceMessages: (room.voiceMessages as unknown as RoomVoiceMessage[]) || [],
     at: Date.now(),
   };
-  roomCache.set(code, entry);
+  setCachedRoom(code, entry);
   return entry;
 }
 
@@ -117,7 +110,7 @@ export async function POST(
         include: { players: true },
       });
       if (!room) {
-        roomCache.delete(key);
+        invalidateRoomCache(key);
         return NextResponse.json({ error: 'Room not found' }, { status: 404 });
       }
       const member = room.players.find((p) => p.deviceId === deviceId);
@@ -156,7 +149,7 @@ export async function POST(
         include: { players: true },
       });
       if (!room) {
-        roomCache.delete(key);
+        invalidateRoomCache(key);
         return NextResponse.json({ error: 'Room not found' }, { status: 404 });
       }
       if (room.status !== 'WAITING') {

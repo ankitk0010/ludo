@@ -40,6 +40,7 @@ export const OpponentStrip: React.FC<OpponentStripProps> = ({
         {players.map((p) => {
           const isTurn = p.color === currentColor;
           const isSpeaking = speakingColor === p.color;
+          const isOffline = p.connected === false;
           const style = gameTheme.players[p.color as PlayerColor];
           const shortName = p.name.split(' (')[0];
           const homeCount = finishedCounts[p.color] ?? 0;
@@ -49,17 +50,24 @@ export const OpponentStrip: React.FC<OpponentStripProps> = ({
               key={p.id}
               type="button"
               onClick={() => onSelect?.(p)}
-              className="shrink-0 flex items-center gap-1.5 pl-1 pr-2 py-1 rounded-full border transition-transform active:scale-95"
+              className={`shrink-0 flex items-center gap-1.5 pl-1 pr-2 py-1 rounded-full border transition-transform active:scale-95 ${
+                isOffline ? 'opacity-65 grayscale-[0.4]' : ''
+              }`}
               style={{
                 background: `linear-gradient(120deg, ${style.primary}1f 0%, rgba(15,23,42,0.9) 55%)`,
-                borderColor: isTurn ? style.primary : 'rgba(51,65,85,0.55)',
+                borderColor: isOffline ? '#ef4444' : isTurn ? style.primary : 'rgba(51,65,85,0.55)',
                 boxShadow: isTurn ? `0 0 10px ${style.glow}` : '0 2px 8px rgba(0,0,0,0.35)',
               }}
               aria-label={`View ${shortName}'s profile`}
             >
               <div className="relative flex-shrink-0">
                 <CharacterAvatar color={p.color as PlayerColor} image={p.avatarUrl} className="w-8 h-8" />
-                {isSpeaking && (
+                {isOffline && (
+                  <span className="absolute -bottom-1 -right-1 px-1 py-0.2 bg-red-600 text-white font-black text-[7px] rounded-full uppercase tracking-tighter border border-slate-900 shadow">
+                    OFF
+                  </span>
+                )}
+                {isSpeaking && !isOffline && (
                   <motion.span
                     animate={{ scale: [1, 1.3, 1], opacity: [0.9, 0.35, 0.9] }}
                     transition={{ repeat: Infinity, duration: 0.9 }}
@@ -69,19 +77,28 @@ export const OpponentStrip: React.FC<OpponentStripProps> = ({
                 )}
               </div>
 
-              <div className="min-w-0 max-w-[78px] text-left">
-                <div className="truncate text-[10px] font-extrabold text-white leading-tight">{shortName}</div>
+              <div className="min-w-0 max-w-[82px] text-left">
+                <div className="truncate text-[10px] font-extrabold text-white leading-tight flex items-center gap-1">
+                  <span>{shortName}</span>
+                  {isOffline && <span className="text-red-400 font-bold text-[8px]">🔴</span>}
+                </div>
                 <div className="mt-0.5 flex items-center gap-1 text-[8px] font-black min-w-0">
                   <span className="uppercase shrink-0" style={{ color: style.primary }}>
                     {p.color}
                   </span>
-                  {isTurn && (
-                    <span className="shrink-0" style={{ color: style.primary }}>
-                      ●
-                    </span>
+                  {isOffline ? (
+                    <span className="shrink-0 text-red-400 font-extrabold">OFFLINE</span>
+                  ) : (
+                    <>
+                      {isTurn && (
+                        <span className="shrink-0" style={{ color: style.primary }}>
+                          ●
+                        </span>
+                      )}
+                      <span className="shrink-0 text-slate-400">🏠{homeCount}</span>
+                      {isSpeaking && <span className="shrink-0 text-emerald-400">🔊</span>}
+                    </>
                   )}
-                  <span className="shrink-0 text-slate-400">🏠{homeCount}</span>
-                  {isSpeaking && <span className="shrink-0 text-emerald-400">🔊</span>}
                 </div>
               </div>
 

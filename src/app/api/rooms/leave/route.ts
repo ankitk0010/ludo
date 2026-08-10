@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { GameState } from '@/game/engine/types';
 import { advanceTurn } from '@/game/engine/reducer';
 import { emitRoom } from '@/lib/roomBus';
+import { setCachedRoom, invalidateRoomCache } from '@/lib/roomCache';
 
 export const runtime = 'nodejs';
 
@@ -29,6 +30,7 @@ export async function POST(request: Request) {
 
     // Lobby mode (WAITING): broadcast SSE state update so seat becomes empty immediately
     if (room.status === 'WAITING') {
+      invalidateRoomCache(code);
       emitRoom(code, {
         type: 'state',
         status: 'WAITING',
@@ -62,6 +64,14 @@ export async function POST(request: Request) {
           ],
         };
 
+        setCachedRoom(code, {
+          id: room.id,
+          status: 'FINISHED',
+          state,
+          voiceMessages: [],
+          at: Date.now(),
+        });
+
         await prisma.gameRoom.update({
           where: { id: room.id },
           data: {
@@ -78,6 +88,14 @@ export async function POST(request: Request) {
       if (currentTurnPlayer && !currentTurnPlayer.connected) {
         state = advanceTurn(state, false, `${currentTurnPlayer.name} left the room. Skipping turn.`);
       }
+
+      setCachedRoom(code, {
+        id: room.id,
+        status: 'PLAYING',
+        state,
+        voiceMessages: [],
+        at: Date.now(),
+      });
 
       await prisma.gameRoom.update({
         where: { id: room.id },
