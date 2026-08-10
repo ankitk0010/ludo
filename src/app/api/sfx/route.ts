@@ -29,7 +29,7 @@ export async function POST(request: Request) {
 
     const data: { name: string; audioUrl: string | null; isActive: boolean } = {
       name: String(body.name || key).slice(0, 60),
-      audioUrl: body.audioUrl ? String(body.audioUrl).slice(0, 600) : null,
+      audioUrl: body.audioUrl ? String(body.audioUrl).slice(0, 3_500_000) : null,
       isActive: body.isActive !== false,
     };
 

@@ -21,21 +21,25 @@ const ALLOWED_TYPES = new Set([
 const ALLOWED_EXTS = new Set(['.mp3', '.wav', '.ogg', '.m4a', '.mp4', '.webm', '.aac']);
 const MAX_BYTES = 2.5 * 1024 * 1024; // 2.5MB max
 
-/** Admin: upload an audio clip; stored on disk, DB keeps only the URL. */
+/** Admin: upload an audio clip; stored on disk or data URI fallback. */
 export async function POST(request: Request) {
   const admin = await voiceAdminUser(request);
-  if (!admin) return NextResponse.json({ error: 'Administrator access required' }, { status: 401 });
+  if (!admin) {
+    return NextResponse.json({ error: 'Administrator access required' }, { status: 401 });
+  }
 
   try {
     const form = await request.formData();
     const file = form.get('file');
 
     if (!file || typeof file === 'string') {
-      return NextResponse.json({ error: 'file is required' }, { status: 400 });
+      return NextResponse.json({ error: 'Audio file is required' }, { status: 400 });
     }
 
-    const ext = path.extname(file.name || '').toLowerCase() || '.mp3';
-    const isMimeValid = ALLOWED_TYPES.has(file.type);
+    const fileObj = file as File;
+    const fileName = fileObj.name || 'sound.mp3';
+    const ext = path.extname(fileName).toLowerCase() || '.mp3';
+    const isMimeValid = ALLOWED_TYPES.has(fileObj.type);
     const isExtValid = ALLOWED_EXTS.has(ext);
 
     if (!isMimeValid && !isExtValid) {
@@ -44,18 +48,30 @@ export async function POST(request: Request) {
         { status: 415 }
       );
     }
-    if (file.size > MAX_BYTES) {
+    if (fileObj.size > MAX_BYTES) {
       return NextResponse.json({ error: 'Audio file too large. Maximum file size is 2.5MB.' }, { status: 413 });
     }
 
-    const safeName = `sfx-${randomUUID()}${ext}`;
-    const dir = path.join(process.cwd(), 'public', 'uploads', 'voice');
-    await mkdir(dir, { recursive: true });
-    await writeFile(path.join(dir, safeName), Buffer.from(await file.arrayBuffer()));
+    const arrayBuffer = await fileObj.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
 
-    return NextResponse.json({ url: `/uploads/voice/${safeName}` });
+    let audioUrl: string;
+    try {
+      const safeName = `sfx-${randomUUID()}${ext}`;
+      const dir = path.join(process.cwd(), 'public', 'uploads', 'voice');
+      await mkdir(dir, { recursive: true });
+      await writeFile(path.join(dir, safeName), buffer);
+      audioUrl = `/uploads/voice/${safeName}`;
+    } catch (diskError) {
+      console.warn('Disk write unavailable, using Data URI fallback:', diskError);
+      const mime = fileObj.type || 'audio/mpeg';
+      audioUrl = `data:${mime};base64,${buffer.toString('base64')}`;
+    }
+
+    return NextResponse.json({ url: audioUrl });
   } catch (error) {
-    console.error('Voice upload failed', error);
-    return NextResponse.json({ error: 'Upload failed' }, { status: 500 });
+    console.error('Voice upload error:', error);
+    const msg = error instanceof Error ? error.message : 'Upload failed';
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
