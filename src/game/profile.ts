@@ -100,3 +100,35 @@ function clearToken() {
 export function profileName(profile: PlayerProfile): string {
   return profile.displayName || profile.username || 'Player';
 }
+
+export function recordMatchWin(profile: PlayerProfile): PlayerProfile {
+  const xpGained = 250;
+  const newXp = (profile.xp || 0) + xpGained;
+  const newWins = (profile.wins || 0) + 1;
+  const newGames = (profile.games || 0) + 1;
+  const newLevel = Math.floor(newXp / 500) + 1;
+  const updated: PlayerProfile = {
+    ...profile,
+    wins: newWins,
+    games: newGames,
+    xp: newXp,
+    level: newLevel,
+  };
+  saveProfile(updated);
+  return updated;
+}
+
+export function recordMatchLoss(profile: PlayerProfile): PlayerProfile {
+  const xpGained = 50;
+  const newXp = (profile.xp || 0) + xpGained;
+  const newGames = (profile.games || 0) + 1;
+  const newLevel = Math.floor(newXp / 500) + 1;
+  const updated: PlayerProfile = {
+    ...profile,
+    games: newGames,
+    xp: newXp,
+    level: newLevel,
+  };
+  saveProfile(updated);
+  return updated;
+}

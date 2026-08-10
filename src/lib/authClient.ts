@@ -68,6 +68,15 @@ export async function apiUpdateProfile(
   return data.user;
 }
 
+export async function apiGetMe(token: string): Promise<AuthResponse['user']> {
+  const res = await fetch('/api/auth/me', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to fetch user');
+  return data.user;
+}
+
 export async function apiLogout(token: string): Promise<void> {
   try {
     await fetch('/api/auth/logout', {

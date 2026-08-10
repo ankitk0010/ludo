@@ -35,9 +35,10 @@ import { ProfileDrawer } from '@/components/profile/ProfileDrawer';
 import { CharacterAvatar } from '@/components/avatar/CharacterAvatar';
 import { gameTheme } from '@/theme/tokens';
 import { getCharacter } from '@/game/characters';
-import { loadProfile, saveProfile, profileName, PlayerProfile, getAuthToken } from '@/game/profile';
+import { isImageAvatar } from '@/game/avatars';
+import { loadProfile, saveProfile, profileName, PlayerProfile, getAuthToken, recordMatchWin, recordMatchLoss } from '@/game/profile';
 import { loadSettings, GameSettings, BOARD_THEME_ACCENT } from '@/game/settings';
-import { apiUpdateProfile } from '@/lib/authClient';
+import { apiUpdateProfile, apiGetMe } from '@/lib/authClient';
 import {
   RoomState,
   getDeviceId,
@@ -689,6 +690,90 @@ function GameContent() {
       doAction({ type: 'PASS_TURN' });
     }
   }, [turnTimeLeft, diceSettled, mounted, inLobby, startCountdown, gameState, currentPlayer, doAction]);
+
+  // Match end & victory persistence: record win/loss, update local profile, post to DB & sync stats
+  const victoryRecordedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const winner = gameState.winner;
+    if (!winner) {
+      victoryRecordedRef.current = null;
+      return;
+    }
+
+    const matchKey = `${roomCode || 'local'}-${winner}-${gameState.players.map((p) => p.color).join('-')}`;
+    if (victoryRecordedRef.current === matchKey) return;
+    victoryRecordedRef.current = matchKey;
+
+    const myColor = gameState.players.find((p) => p.name === profileName(profile))?.color || profile.characterId;
+    const isMyWin = myColor === winner;
+
+    // 1. Instantly update local profile state in LocalStorage & component state
+    const updatedProfile = isMyWin ? recordMatchWin(profile) : recordMatchLoss(profile);
+    setProfile(updatedProfile);
+
+    // 2. Play victory or defeat sound
+    if (isMyWin) {
+      soundEngine.playVictory();
+    } else {
+      soundEngine.playDefeat();
+    }
+
+    // 3. Post match record to server to update database user row (wins, games, xp, level)
+    const token = getAuthToken();
+    const winnerPlayer = gameState.players.find((p) => p.color === winner);
+    const winnerName = winnerPlayer?.name || winner;
+
+    fetch('/api/games', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        roomCode: roomCode || 'LOCAL',
+        winnerColor: winner,
+        winnerName,
+        turnsCount: 1,
+      }),
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (data.user) {
+          const syncedProfile: PlayerProfile = {
+            username: data.user.username,
+            displayName: data.user.displayName || data.user.username,
+            characterId: (data.user.characterId as PlayerColor) || 'red',
+            avatarUrl: isImageAvatar(data.user.avatar) ? data.user.avatar : undefined,
+            email: data.user.email || undefined,
+            level: data.user.level,
+            wins: data.user.wins,
+            games: data.user.games,
+            xp: data.user.xp,
+          };
+          saveProfile(syncedProfile);
+          setProfile(syncedProfile);
+        } else if (token) {
+          const me = await apiGetMe(token).catch(() => null);
+          if (me) {
+            const syncedProfile: PlayerProfile = {
+              username: me.username,
+              displayName: me.displayName || me.username,
+              characterId: (me.characterId as PlayerColor) || 'red',
+              avatarUrl: isImageAvatar(me.avatar) ? me.avatar : undefined,
+              email: me.email || undefined,
+              level: me.level,
+              wins: me.wins,
+              games: me.games,
+              xp: me.xp,
+            };
+            saveProfile(syncedProfile);
+            setProfile(syncedProfile);
+          }
+        }
+      })
+      .catch(() => {});
+  }, [gameState.winner, gameState.players, roomCode, profile]);
 
   // Browser back-button guard: warn before leaving an active match.
   useEffect(() => {
