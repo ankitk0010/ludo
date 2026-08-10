@@ -196,7 +196,7 @@ export const VoiceChat: React.FC<{
     });
 
     appendToChatLog({
-      id: `self-${Date.now()}`,
+      id: `self-${idSeq++}`,
       text,
       icon: '💬',
       byName: 'You',
@@ -231,7 +231,7 @@ export const VoiceChat: React.FC<{
     });
 
     appendToChatLog({
-      id: `self-${Date.now()}`,
+      id: `self-${idSeq++}`,
       text: emoji,
       icon: emoji,
       byName: 'You',
@@ -265,7 +265,7 @@ export const VoiceChat: React.FC<{
     });
 
     appendToChatLog({
-      id: `self-${Date.now()}`,
+      id: `self-${idSeq++}`,
       text: phrase.text,
       icon: phrase.icon || '🎙️',
       byName: 'You',

@@ -56,7 +56,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ isOpen, onClose, playe
   useEffect(() => {
     if (!isOpen) return;
     let live = true;
-    setLoading(true);
+    setTimeout(() => { if (live) setLoading(true); }, 0);
     fetch('/api/games')
       .then((res) => res.json())
       .then((data) => {

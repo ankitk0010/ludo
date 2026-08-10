@@ -91,7 +91,7 @@ export async function POST(
     if (!deviceId) return NextResponse.json({ error: 'Missing device id' }, { status: 400 });
 
     touchPlayerPresence(key, deviceId);
-    let entry = (await checkRoomPresenceAndDisconnects(key)) || (await loadRoom(key));
+    const entry = (await checkRoomPresenceAndDisconnects(key)) || (await loadRoom(key));
     if (!entry) return NextResponse.json({ error: 'Room not found' }, { status: 404 });
 
     // ---- Live Microphone Voice Stream Relay ----

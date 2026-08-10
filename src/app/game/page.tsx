@@ -19,7 +19,6 @@ import { LudoBoard } from '@/components/board/LudoBoard';
 import { DiceComponent } from '@/components/dice/DiceComponent';
 import { PowerCardDeck } from '@/components/powerCards/PowerCardDeck';
 import { VoiceChat } from '@/components/voice/VoiceChat';
-import { VoiceControls } from '@/components/voice/VoiceControls';
 import { PlayerCard } from '@/components/game/PlayerCard';
 import { LocalPlayerDock } from '@/components/game/LocalPlayerDock';
 import { Leaderboard } from '@/components/leaderboard/Leaderboard';
@@ -30,7 +29,6 @@ import { OpponentStrip } from '@/components/game/OpponentStrip';
 import { OpponentProfileSheet } from '@/components/profile/OpponentProfileSheet';
 import { soundEngine, refreshSfxOverrides, setupAudioUnlockListener } from '@/components/sound/soundEngine';
 import { AudioSettings } from '@/components/sound/AudioSettings';
-import { useVoiceMic } from '@/components/sound/useVoiceMic';
 import { ProfileDrawer } from '@/components/profile/ProfileDrawer';
 import { CharacterAvatar } from '@/components/avatar/CharacterAvatar';
 import { gameTheme } from '@/theme/tokens';
@@ -50,7 +48,6 @@ import {
   apiRoomState,
   apiRoomStart,
   apiRoomAction,
-  apiSendLiveVoice,
   apiPingRoom,
   subscribeRoomStream,
   RoomVoiceMessage,
@@ -58,51 +55,6 @@ import {
 
 const TURN_TIMEOUT_SECONDS = 30;
 const STORAGE_PREFIX = 'ludo_save_v1_';
-
-let sharedAudioCtx: AudioContext | null = null;
-function getSharedAudioContext(): AudioContext {
-  if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
-    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    sharedAudioCtx = new AudioContextClass();
-  }
-  if (sharedAudioCtx.state === 'suspended') {
-    void sharedAudioCtx.resume();
-  }
-  return sharedAudioCtx;
-}
-
-function playLiveAudioChunk(base64: string, mimeType: string) {
-  try {
-    const ctx = getSharedAudioContext();
-    const parts = mimeType.split('/');
-    const sampleRate = parts[0] === 'pcm' && parts[1] ? parseInt(parts[1], 10) : 44100;
-
-    const binaryStr = atob(base64);
-    const len = binaryStr.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      bytes[i] = binaryStr.charCodeAt(i);
-    }
-    const int16 = new Int16Array(bytes.buffer);
-    const float32 = new Float32Array(int16.length);
-    for (let i = 0; i < int16.length; i++) {
-      float32[i] = int16[i] < 0 ? int16[i] / 32768 : int16[i] / 32767;
-    }
-
-    const buffer = ctx.createBuffer(1, float32.length, sampleRate);
-    buffer.getChannelData(0).set(float32);
-
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(ctx.destination);
-    source.start(0);
-  } catch {
-    try {
-      const audio = new Audio(`data:${mimeType};base64,${base64}`);
-      void audio.play();
-    } catch {}
-  }
-}
 
 /*
  * Dynamically sizes the square Ludo board to fill the available stage:
@@ -308,7 +260,7 @@ function GameContent() {
             applyServerState(res.state);
           })
           .catch(() => {
-            apiRoomState(roomCode)
+            apiRoomState(roomCode, deviceId)
               .then((s) => {
                 if (s.state) applyServerState(s.state);
               })
@@ -386,7 +338,7 @@ function GameContent() {
           setRoomError(null);
           // The host started the match — pull the authoritative state and join the game.
           if (d.room.status === 'PLAYING') {
-            apiRoomState(roomCode)
+            apiRoomState(roomCode, deviceId)
               .then((s) => {
                 if (!s.state) return;
                 applyServerState(s.state);
@@ -399,13 +351,13 @@ function GameContent() {
         .catch(() => {});
     }, 4000);
     return () => clearInterval(id);
-  }, [mounted, mode, inLobby, roomCode, applyServerState, beginStartCountdown]);
+  }, [mounted, mode, inLobby, roomCode, applyServerState, beginStartCountdown, deviceId]);
 
   // ---- Online rooms: slow poll fallback (SSE is the fast path) ----
   useEffect(() => {
     if (!mounted || mode !== 'room' || inLobby) return;
     const id = setInterval(() => {
-      apiRoomState(roomCode)
+      apiRoomState(roomCode, deviceId)
         .then((s) => {
           if (s.voiceMessages) ingestVoice(s.voiceMessages);
           if (!s.state || s.status !== 'PLAYING') return;
@@ -414,7 +366,7 @@ function GameContent() {
         .catch(() => {});
     }, 4000);
     return () => clearInterval(id);
-  }, [mounted, mode, inLobby, roomCode, applyServerState, ingestVoice]);
+  }, [mounted, mode, inLobby, roomCode, applyServerState, ingestVoice, deviceId]);
 
   // 3-2-1-GO start countdown ticker.
   useEffect(() => {
@@ -658,13 +610,7 @@ function GameContent() {
     if (gameState.dice.rolling || !diceSettled || gameState.dice.value === null) return;
 
     timerKeyRef.current += 1;
-    const bestMove = getBestBotMove(gameState, currentPlayer.color, gameState.dice.value);
-    if (bestMove) {
-      soundEngine.playTokenMove();
-      doAction({ type: 'SELECT_TOKEN', targetTokenId: bestMove.tokenId });
-    } else {
-      doAction({ type: 'PASS_TURN' });
-    }
+    doAction({ type: 'PASS_TURN' });
   }, [turnTimeLeft, diceSettled, mounted, inLobby, startCountdown, gameState, currentPlayer, doAction]);
 
   // Match end & victory persistence: record win/loss, update local profile, post to DB & sync stats
