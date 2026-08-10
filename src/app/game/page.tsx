@@ -175,21 +175,6 @@ function GameContent() {
   const [roomAttempt, setRoomAttempt] = useState(0);
   const [viewProfile, setViewProfile] = useState<Player | null>(null);
 
-  // Live microphone audio stream handler
-  const handleLiveAudioChunk = useCallback(
-    (base64: string, mimeType: string) => {
-      if (mode === 'room' && !inLobby) {
-        apiSendLiveVoice(roomCode, deviceId, base64, mimeType);
-      }
-    },
-    [mode, inLobby, roomCode, deviceId]
-  );
-
-  const mic = useVoiceMic({ onAudioChunk: handleLiveAudioChunk });
-  const meSpeaking = mic.speaking;
-  const [remoteSpeakingColor, setRemoteSpeakingColor] = useState<string | null>(null);
-  const remoteSpeakingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const [speakerMuted, setSpeakerMuted] = useState(false);
   const timerKeyRef = useRef(0);
   const [diceSettled, setDiceSettled] = useState(false);
@@ -386,14 +371,6 @@ function GameContent() {
         applyServerState(event.state);
       } else if (event.type === 'voice') {
         ingestVoice(event.voiceMessages);
-      } else if (event.type === 'live_voice') {
-        const chunk = event.chunk;
-        if (chunk.byDeviceId !== deviceId && !speakerMuted) {
-          setRemoteSpeakingColor(chunk.byColor);
-          if (remoteSpeakingTimerRef.current) clearTimeout(remoteSpeakingTimerRef.current);
-          remoteSpeakingTimerRef.current = setTimeout(() => setRemoteSpeakingColor(null), 1200);
-          playLiveAudioChunk(chunk.audioBase64, chunk.mimeType);
-        }
       }
     });
     return unsubscribe;
@@ -511,7 +488,6 @@ function GameContent() {
     return map;
   }, [gameState.tokens]);
 
-  const speakingSeat = meSpeaking ? localColor : remoteSpeakingColor || undefined;
   const opponents = gameState.players.filter((p) => p.id !== myPlayerId);
 
   // Room invite link used by the lobby share button and player profile sheets.
@@ -964,9 +940,9 @@ function GameContent() {
     return {
       player,
       currentColor: currentPlayer.color,
-      speakingColor: speakingSeat,
+      speakingColor: undefined,
       homeCount: homeCounts[player.color] ?? 0,
-      micOn: isLocalSeat && mic.micOn,
+      micOn: false,
       speakerMuted: isLocalSeat && speakerMuted,
       isLocal: isLocalSeat,
       avatarImage: isLocalSeat ? profile.avatarUrl : undefined,
@@ -1295,7 +1271,6 @@ function GameContent() {
                     <OpponentStrip
                       players={opponents}
                       currentColor={currentPlayer.color}
-                      speakingColor={speakingSeat}
                       finishedCounts={homeCounts}
                       onSelect={openProfileSheet}
                     />
@@ -1308,9 +1283,7 @@ function GameContent() {
                 <LocalPlayerDock
                   player={localPlayer}
                   currentColor={currentPlayer.color}
-                  speakingColor={speakingSeat}
                   homeCount={homeCounts[localPlayer.color] ?? 0}
-                  mic={mic}
                   speakerMuted={speakerMuted}
                   onSpeakerToggle={handleSpeakerToggle}
                   avatarImage={profile.avatarUrl}
@@ -1404,15 +1377,8 @@ function GameContent() {
                 </div>
               </div>
 
-              {/* Voice zone — quick voice lines (all) + mic/speaker (desktop) */}
+              {/* Voice zone — quick chat & voice reactions */}
               <div className="flex-1 min-w-0 flex items-center justify-end gap-1.5">
-                <div className="hidden sm:flex">
-                  <VoiceControls
-                    mic={mic}
-                    speakerMuted={speakerMuted}
-                    onSpeakerToggle={handleSpeakerToggle}
-                  />
-                </div>
                 <VoiceChat
                   players={gameState.players}
                   roomMode={mode === 'room'}
@@ -1496,7 +1462,6 @@ function GameContent() {
             onClose={() => setShowProfileSheet(false)}
             username={profile.username || 'Player'}
             profile={profile}
-            mic={mic}
             onUpdateProfile={(p) => {
               saveProfile(p);
               setProfile(p);

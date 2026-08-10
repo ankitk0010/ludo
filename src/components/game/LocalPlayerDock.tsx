@@ -15,7 +15,7 @@ interface LocalPlayerDockProps {
   speakingColor?: string;
   /** Finished gotis for this player. */
   homeCount?: number;
-  mic: VoiceMicApi;
+  mic?: VoiceMicApi;
   speakerMuted: boolean;
   onSpeakerToggle: () => void;
   /** Optional uploaded/preset avatar image for this player. */
@@ -46,7 +46,7 @@ export const LocalPlayerDock: React.FC<LocalPlayerDockProps> = ({
   const isSpeaking = !speakerMuted && speakingColor === p.color;
   const style = gameTheme.players[p.color];
   const shortName = p.name.split(' (')[0];
-  const { micOn, micBusy, micError, toggleMic } = mic;
+  const { micOn, micBusy, micError, toggleMic } = mic || { micOn: false, micBusy: false, micError: null, toggleMic: () => {} };
 
   return (
     <div
@@ -120,7 +120,7 @@ export const LocalPlayerDock: React.FC<LocalPlayerDockProps> = ({
             {[0, 1, 2, 3].map((i) => (
               <motion.span
                 key={i}
-                animate={mic.speaking ? { height: ['35%', '100%', '35%'] } : { height: '28%' }}
+                animate={mic?.speaking ? { height: ['35%', '100%', '35%'] } : { height: '28%' }}
                 transition={{ repeat: Infinity, duration: 0.7, delay: i * 0.09 }}
                 className="w-[3px] rounded-full"
                 style={{ background: style.primary, height: '28%' }}

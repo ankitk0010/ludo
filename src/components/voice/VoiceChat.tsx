@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Volume2, X, Layers } from 'lucide-react';
+import { MessageSquare, X, Send, Layers } from 'lucide-react';
 import { Player, PlayerColor } from '@/game/engine/types';
 import { gameTheme } from '@/theme/tokens';
 import { soundEngine } from '@/components/sound/soundEngine';
@@ -23,7 +23,7 @@ interface VoiceBubble {
   color: string;
 }
 
-const RATE_WINDOW_MS = 8000;
+const RATE_WINDOW_MS = 6000;
 const RATE_MAX = 10;
 
 const randomOf = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
@@ -34,14 +34,10 @@ let idSeq = 1;
 type LangFilter = 'all' | 'hi' | 'en';
 
 /*
- * Preset voice reactions (system B). The player taps a short Hindi/English
- * phrase; a speech bubble pops up near their profile and the phrase is spoken
- * (TTS in the phrase's language, or the admin-uploaded audio clip). The list
- * is managed by admins through the Voice Library — the game only fetches it.
- *
- * In online rooms the tapped phrase is also relayed through the authoritative
- * room API so every other player hears it and sees a bubble with the sender's
- * name/color (real-time via the room SSE stream).
+ * In-game Text Chat & Quick Reaction System.
+ * Ultra-fast, zero-overhead text and quick voice lines.
+ * Players can type custom chat messages OR tap quick Hindi/English voice lines.
+ * Custom text and voice lines appear as speech bubbles next to players in real time!
  */
 export const VoiceChat: React.FC<{
   players: Player[];
@@ -60,6 +56,7 @@ export const VoiceChat: React.FC<{
   const [unread, setUnread] = useState(0);
   const [phrases, setPhrases] = useState<VoicePhrase[]>(BUILTIN_PHRASES);
   const [lang, setLang] = useState<LangFilter>('all');
+  const [customText, setCustomText] = useState('');
   const searchesRef = useRef<number[]>([]);
   const bubbleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isOpenRef = useRef(isOpen);
@@ -78,7 +75,7 @@ export const VoiceChat: React.FC<{
     };
   }, []);
 
-  // Preload the most-used audio clips (cached; no per-click Audio objects).
+  // Preload commonly used audio clips
   useEffect(() => {
     if (phrases.length > 0) preloadPhrases(phrases);
   }, [phrases]);
@@ -111,7 +108,7 @@ export const VoiceChat: React.FC<{
   const showBubble = (msg: VoiceBubble) => {
     setBubble(msg);
     if (bubbleTimerRef.current) clearTimeout(bubbleTimerRef.current);
-    bubbleTimerRef.current = setTimeout(() => setBubble(null), 2400);
+    bubbleTimerRef.current = setTimeout(() => setBubble(null), 3000);
   };
 
   // Surface incoming room messages as bubbles, speak them, and bump unread.
@@ -122,6 +119,8 @@ export const VoiceChat: React.FC<{
       const phrase = phrases.find((p) => p.id === msg.phraseId);
       if (phrase) {
         playPhrase(phrase);
+      } else {
+        soundEngine.playReaction();
       }
       showBubble({
         id: idSeq++,
@@ -134,6 +133,33 @@ export const VoiceChat: React.FC<{
     });
     onIncomingHandled?.();
   }, [incoming, phrases, deviceId, onIncomingHandled]);
+
+  const sendCustomChat = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const text = customText.trim();
+    if (!text || isRateLimited()) return;
+
+    searchesRef.current = [...searchesRef.current, nowTs()];
+    soundEngine.playReaction();
+    showBubble({
+      id: idSeq++,
+      text,
+      emoji: '💬',
+      by: 'You',
+      color: myColorHex,
+    });
+
+    if (roomMode && roomCode && deviceId) {
+      apiRoomVoice(roomCode, deviceId, {
+        phraseId: 'custom-text',
+        text,
+        language: 'en',
+        icon: '💬',
+      }).catch(() => {});
+    }
+
+    setCustomText('');
+  };
 
   const react = (phrase: VoicePhrase) => {
     if (isRateLimited()) return;
@@ -148,7 +174,6 @@ export const VoiceChat: React.FC<{
       color: myColorHex,
     });
 
-    // Relay to the other players in an online room.
     if (roomMode && roomCode && deviceId) {
       apiRoomVoice(roomCode, deviceId, {
         phraseId: phrase.id,
@@ -158,7 +183,7 @@ export const VoiceChat: React.FC<{
       }).catch(() => {});
     }
 
-    // Bots occasionally reply with a quiet English line.
+    // Bots occasionally reply with a quiet English line
     const bots = players.filter((p) => p.isBot);
     const enReplies = phrases.filter((p) => p.isActive !== false && p.language === 'en');
     if (bots.length > 0 && enReplies.length > 0 && randomOf([true, false])) {
@@ -173,13 +198,13 @@ export const VoiceChat: React.FC<{
           color: gameTheme.players[bot.color]?.primary ?? '#8b5cf6',
         });
         if (!isOpenRef.current) setUnread((u) => u + 1);
-      }, randomDelayMs(2200, 3600));
+      }, randomDelayMs(2000, 3500));
     }
   };
 
   return (
     <>
-      {/* Docked trigger — the page places this in the bottom action bar */}
+      {/* Trigger Button — docked in action bar */}
       <button
         type="button"
         onClick={() => {
@@ -190,10 +215,10 @@ export const VoiceChat: React.FC<{
             soundEngine.playClick();
           }
         }}
-        aria-label={isOpen ? 'Close voice reactions' : 'Open voice reactions'}
+        aria-label={isOpen ? 'Close chat' : 'Open in-game chat'}
         className={`relative w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 text-white flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition-transform border border-purple-300/40 flex-shrink-0 ${className}`}
       >
-        {isOpen ? <X className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+        {isOpen ? <X className="w-4 h-4" /> : <MessageSquare className="w-4 h-4" />}
         {unread > 0 && !isOpen && (
           <motion.span
             key={unread}
@@ -207,7 +232,7 @@ export const VoiceChat: React.FC<{
         )}
       </button>
 
-      {/* Transient speech bubble near the player's profile */}
+      {/* Speech bubble */}
       <AnimatePresence>
         {bubble && (
           <motion.div
@@ -216,13 +241,13 @@ export const VoiceChat: React.FC<{
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 6, scale: 0.9 }}
             transition={{ type: 'spring', stiffness: 360, damping: 24 }}
-            className="fixed bottom-[8.75rem] z-[80] pointer-events-none flex items-center gap-2 px-3 py-2 rounded-2xl bg-slate-900/95 border border-slate-700 shadow-2xl max-w-[250px] left-3 sm:right-4 sm:left-auto"
+            className="fixed bottom-[8.75rem] z-[80] pointer-events-none flex items-center gap-2 px-3 py-2 rounded-2xl bg-slate-900/95 border border-slate-700 shadow-2xl max-w-[260px] left-3 sm:right-4 sm:left-auto"
           >
             <motion.span animate={{ scale: [1, 1.15, 1] }} transition={{ repeat: Infinity, duration: 0.7 }} className="text-lg">
               {bubble.emoji}
             </motion.span>
-            <div className="min-w-0">
-              <div className="text-[9px] font-black" style={{ color: bubble.color }}>
+            <div className="min-w-0 flex-1">
+              <div className="text-[9px] font-black truncate" style={{ color: bubble.color }}>
                 {bubble.by}
               </div>
               <div className="text-[11px] font-semibold text-white truncate">{bubble.text}</div>
@@ -231,22 +256,22 @@ export const VoiceChat: React.FC<{
         )}
       </AnimatePresence>
 
-      {/* Voice reactions sheet — bottom sheet on mobile, popover on desktop */}
+      {/* Chat & Voice Reaction Sheet */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
             initial={{ opacity: 0, y: 20, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.96 }}
-            className="fixed z-[80] left-3 right-3 mx-auto max-w-sm sm:left-auto sm:right-4 sm:mx-0 sm:max-w-none sm:w-80 max-h-[min(360px,58dvh)] bg-slate-900/95 backdrop-blur-md border border-slate-700 rounded-2xl shadow-2xl flex flex-col overflow-hidden bottom-[8.25rem]"
+            className="fixed z-[80] left-3 right-3 mx-auto max-w-sm sm:left-auto sm:right-4 sm:mx-0 sm:max-w-none sm:w-84 max-h-[min(400px,62dvh)] bg-slate-900/95 backdrop-blur-md border border-slate-700 rounded-2xl shadow-2xl flex flex-col overflow-hidden bottom-[8.25rem]"
           >
             {/* Header */}
             <div className="px-3 py-2.5 bg-gradient-to-r from-purple-600/25 to-indigo-600/15 border-b border-slate-800">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-black text-white flex items-center gap-1.5">
-                  <Volume2 className="w-3.5 h-3.5 text-purple-300" /> VOICE REACTIONS
+                  <MessageSquare className="w-3.5 h-3.5 text-purple-300" /> IN-GAME CHAT & REACTIONS
                 </span>
-                <span className="text-[9px] text-slate-400 font-bold">Tap to speak 🔊</span>
+                <span className="text-[9px] text-slate-400 font-bold">Live Text & Voice 💬</span>
               </div>
 
               {/* Language filter */}
@@ -262,22 +287,23 @@ export const VoiceChat: React.FC<{
                     key={key}
                     type="button"
                     onClick={() => setLang(key)}
-                    className={`px-2 py-1 rounded-full text-[9px] font-black transition-colors ${lang === key
+                    className={`px-2 py-1 rounded-full text-[9px] font-black transition-colors ${
+                      lang === key
                         ? 'bg-purple-500/30 text-white border border-purple-400/50'
                         : 'bg-slate-800/70 text-slate-400 border border-transparent hover:text-white'
-                      }`}
+                    }`}
                   >
                     {label}
                   </button>
                 ))}
                 <span className="ml-auto flex items-center gap-1 text-[8px] font-bold text-slate-500">
-                  <Layers className="w-2.5 h-2.5" /> {shown.length} phrases
+                  <Layers className="w-2.5 h-2.5" /> {shown.length} quick lines
                 </span>
               </div>
             </div>
 
-            {/* Phrase grid */}
-            <div className="grid grid-cols-2 gap-1.5 p-2 overflow-y-auto">
+            {/* Quick reaction grid */}
+            <div className="grid grid-cols-2 gap-1.5 p-2 overflow-y-auto max-h-[220px]">
               {shown.map((p) => (
                 <button
                   key={p.id}
@@ -287,19 +313,27 @@ export const VoiceChat: React.FC<{
                 >
                   <span className="text-base leading-none shrink-0">{p.icon || '🎙️'}</span>
                   <span className="flex-1 truncate">{p.text}</span>
-                  <span className="text-slate-500 text-[10px] shrink-0">🔊</span>
                 </button>
               ))}
-              {shown.length === 0 && (
-                <div className="col-span-full py-3 text-center text-[10px] text-slate-500 italic">
-                  No phrases in this language yet.
-                </div>
-              )}
             </div>
 
-            <div className="px-3 pb-1.5 text-center text-[8px] font-bold text-slate-600">
-              Quick reactions only — managed by the game admins.
-            </div>
+            {/* Custom text chat form */}
+            <form onSubmit={sendCustomChat} className="p-2 border-t border-slate-800 bg-slate-950/80 flex items-center gap-1.5">
+              <input
+                value={customText}
+                onChange={(e) => setCustomText(e.target.value)}
+                placeholder="Type custom chat message…"
+                maxLength={80}
+                className="flex-1 py-1.5 px-3 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-purple-400"
+              />
+              <button
+                type="submit"
+                disabled={!customText.trim()}
+                className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white font-bold text-xs flex items-center gap-1 transition-all shrink-0"
+              >
+                <Send className="w-3 h-3" />
+              </button>
+            </form>
           </motion.div>
         )}
       </AnimatePresence>

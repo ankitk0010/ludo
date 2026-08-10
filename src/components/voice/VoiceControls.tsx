@@ -6,7 +6,7 @@ import { Mic, MicOff, Volume2, VolumeX, PhoneOff, AlertTriangle } from 'lucide-r
 import type { VoiceMicApi } from '@/components/sound/useVoiceMic';
 
 interface VoiceControlsProps {
-  mic: VoiceMicApi;
+  mic?: VoiceMicApi;
   speakerMuted: boolean;
   onSpeakerToggle: () => void;
   className?: string;
@@ -27,7 +27,7 @@ export const VoiceControls: React.FC<VoiceControlsProps> = ({
   onSpeakerToggle,
   className = '',
 }) => {
-  const { micOn, micBusy, micError, speaking, toggleMic } = mic;
+  const { micOn, micBusy, micError, speaking, toggleMic } = mic || { micOn: false, micBusy: false, micError: null, speaking: false, toggleMic: () => {} };
 
   return (
     <div className={`flex items-center gap-1.5 ${className}`}>
