@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Copy, Check, UserPlus, Play, Bot, Lock, Shapes, Share2, Eye, X, Crown, Sparkles, LogOut } from 'lucide-react';
 import { Player, PlayerColor } from '@/game/engine/types';
 import { AvatarSelector } from '@/components/avatar/AvatarSelector';
 import { getCharacter } from '@/game/characters';
 import { CharacterAvatar } from '@/components/avatar/CharacterAvatar';
+import { registerServiceWorker, apiRegisterPushSubscription } from '@/lib/roomClient';
 
 interface LobbyRoomProps {
   roomCode: string;
@@ -47,7 +48,24 @@ export const LobbyRoom: React.FC<LobbyRoomProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const [shared, setShared] = useState(false);
+  const [notifGranted, setNotifGranted] = useState(false);
+  const pushSubRef = useRef<PushSubscription | null>(null);
   const myChar = getCharacter(characterId);
+
+  // Register service worker + push subscription when the lobby opens in room mode
+  useEffect(() => {
+    if (!roomMode) return;
+    let cancelled = false;
+    registerServiceWorker().then((sub) => {
+      if (cancelled || !sub) return;
+      pushSubRef.current = sub;
+      setNotifGranted(true);
+      // Tell the server about this device's push endpoint
+      const deviceId = typeof window !== 'undefined' ? (localStorage.getItem('ludo_device_id_v1') || '') : '';
+      if (deviceId) void apiRegisterPushSubscription(deviceId, sub);
+    });
+    return () => { cancelled = true; };
+  }, [roomMode]);
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(roomCode);

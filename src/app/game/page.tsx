@@ -132,6 +132,15 @@ function GameContent() {
   const [diceSettled, setDiceSettled] = useState(false);
   const fitBoard = useFitBoard();
 
+  // Tracks whether SSE has fired recently (to suppress redundant poll)
+  const sseLastFiredRef = useRef(0);
+  // Prevents bot from firing multiple overlapping timers for the same turn
+  const botActedRef = useRef('');
+  // Debounce timer for localStorage saves
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Prevent duplicate victory recording across re-renders
+  const victoryRecordedRef = useRef<string | null>(null);
+
   // Mirrors `inLobby` so the SSE callback can read it without re-subscribing.
   const inLobbyRef = useRef(inLobby);
   useEffect(() => {
@@ -223,18 +232,11 @@ function GameContent() {
 
   // Apply the server's authoritative state without needless re-renders —
   // only when something actually changed (keeps local timers/highlights stable).
+  // Cheap signature: no deep JSON.stringify — just key scalars concatenated.
   const lastGameSig = useRef('');
   const applyServerState = useCallback(
     (state: GameState) => {
-      const sig = JSON.stringify([
-        state.currentTurnIndex,
-        state.dice.value,
-        state.dice.mustMove,
-        state.winner,
-        state.tokens,
-        state.pendingLuckyRoll,
-        state.activePowerCard,
-      ]);
+      const sig = `${state.turnNumber}|${state.currentTurnIndex}|${state.dice.value}|${state.dice.mustMove ? 1 : 0}|${state.winner ?? ''}|${state.pendingLuckyRoll ? 1 : 0}`;
       if (sig === lastGameSig.current) return;
       lastGameSig.current = sig;
       setPlayers(state.players);
@@ -243,15 +245,17 @@ function GameContent() {
     []
   );
 
-  // Optimistic turn action execution: Dispatch locally immediately so the UI
-  // responds in 0ms (no freezing or lag on dice rolls / token moves), while sending
-  // the action to the server asynchronously.
+  // Optimistic turn action execution.
+  // In ROOM mode:
+  //   - ROLL_DICE: server-authoritative only (all players must see same value)
+  //   - SELECT_TOKEN: server-authoritative only (prevents double-capture from optimistic+server)
+  //   - PASS_TURN / others: local optimistic dispatch for instant feedback
+  // In local mode: everything dispatches locally.
   const doAction = useCallback(
     (action: GameAction) => {
       if (mode === 'room' && !inLobby) {
-        // Optimistically dispatch token selection & power card moves locally so the goti moves in 0ms.
-        // For ROLL_DICE, let the authoritative server roll the number so all room members receive the same dice value.
-        if (action.type !== 'ROLL_DICE') {
+        // Only non-movement actions get local optimistic dispatch
+        if (action.type !== 'ROLL_DICE' && action.type !== 'SELECT_TOKEN') {
           dispatch(action);
         }
         apiRoomAction(roomCode, deviceId, action)
@@ -311,6 +315,8 @@ function GameContent() {
   useEffect(() => {
     if (!mounted || mode !== 'room' || roomError) return;
     const unsubscribe = subscribeRoomStream(roomCode, (event) => {
+      // Mark SSE as alive so the fallback poll skips redundant fetches
+      sseLastFiredRef.current = Date.now();
       if (event.type === 'state') {
         // The host started the match — pull in the authoritative state and join the game.
         if (event.status === 'PLAYING' && event.state && inLobbyRef.current) {
@@ -354,9 +360,13 @@ function GameContent() {
   }, [mounted, mode, inLobby, roomCode, applyServerState, beginStartCountdown, deviceId]);
 
   // ---- Online rooms: slow poll fallback (SSE is the fast path) ----
+  // Only fetches if SSE hasn't fired in the last 8 seconds — prevents
+  // doubling every state update with both SSE and poll simultaneously.
   useEffect(() => {
     if (!mounted || mode !== 'room' || inLobby) return;
     const id = setInterval(() => {
+      // Skip if SSE is healthy (fired within last 8s)
+      if (Date.now() - sseLastFiredRef.current < 8000) return;
       apiRoomState(roomCode, deviceId)
         .then((s) => {
           if (s.voiceMessages) ingestVoice(s.voiceMessages);
@@ -492,16 +502,22 @@ function GameContent() {
     return () => clearTimeout(t);
   }, [mounted, storageKey]);
 
-  // ---- Persist game state whenever it changes while playing ----
+  // ---- Persist game state: debounced every 10s to avoid blocking the main thread ----
   useEffect(() => {
     if (!mounted || inLobby || !saveInitialized) return;
     if (gameState.status !== 'playing') return;
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(gameState));
-    } catch {
-      /* storage may be full/unavailable */
-    }
-  }, [mounted, inLobby, saveInitialized, gameState, storageKey]);
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(gameState));
+      } catch {
+        /* storage may be full/unavailable */
+      }
+    }, 10_000);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [mounted, inLobby, saveInitialized, gameState.turnNumber, gameState.status, storageKey]);
 
   const handleResumeGame = () => {
     setShowReconnect(false);
@@ -532,27 +548,34 @@ function GameContent() {
   };
 
   // ---- AI Bot Automatic Turn Logic ----
+  // botActedRef prevents overlapping timers when gameState updates mid-animation.
+  // Key format: `turnNumber-color-diceValue` — only one action per unique turn state.
   useEffect(() => {
     if (!mounted || inLobby || startCountdown > 0 || gameState.status !== 'playing' || gameState.winner) return;
+    if (!currentPlayer.isBot) return;
 
-    if (currentPlayer.isBot) {
-      const timer = setTimeout(() => {
-        if (!gameState.dice.mustMove && !gameState.dice.noLegalMove) {
-          doAction({ type: 'ROLL_DICE' });
-        } else if (gameState.dice.value !== null && !gameState.dice.noLegalMove) {
-          const bestMove = getBestBotMove(gameState, currentPlayer.color, gameState.dice.value);
-          if (bestMove) {
-            soundEngine.playTokenMove();
-            doAction({ type: 'SELECT_TOKEN', targetTokenId: bestMove.tokenId });
-          } else {
-            doAction({ type: 'PASS_TURN' });
-          }
+    const turnKey = `${gameState.turnNumber}-${currentPlayer.color}-${gameState.dice.value ?? 'null'}`;
+    if (botActedRef.current === turnKey) return; // already acted this turn state
+
+    const timer = setTimeout(() => {
+      if (botActedRef.current === turnKey) return;
+      if (!gameState.dice.mustMove && !gameState.dice.noLegalMove) {
+        botActedRef.current = turnKey;
+        doAction({ type: 'ROLL_DICE' });
+      } else if (gameState.dice.value !== null && !gameState.dice.noLegalMove) {
+        const bestMove = getBestBotMove(gameState, currentPlayer.color, gameState.dice.value);
+        botActedRef.current = turnKey;
+        if (bestMove) {
+          soundEngine.playTokenMove();
+          doAction({ type: 'SELECT_TOKEN', targetTokenId: bestMove.tokenId });
+        } else {
+          doAction({ type: 'PASS_TURN' });
         }
-      }, 900);
+      }
+    }, 900);
 
-      return () => clearTimeout(timer);
-    }
-  }, [mounted, gameState, currentPlayer, inLobby, startCountdown, doAction]);
+    return () => clearTimeout(timer);
+  }, [mounted, gameState.turnNumber, gameState.dice.mustMove, gameState.dice.noLegalMove, gameState.dice.value, gameState.status, gameState.winner, currentPlayer, inLobby, startCountdown, doAction]);
 
   // ---- Auto-pass after showing the rolled dice when there are no legal moves ----
   useEffect(() => {
@@ -593,7 +616,7 @@ function GameContent() {
   }, [mounted, inLobby, startCountdown, gameState.status, gameState.winner, currentPlayer, gameState.dice.mustMove, gameState.dice.noLegalMove, doAction]);
 
   // When timer reaches 0, act on behalf of the human player — but never while
-// the dice is still spinning or before its result has been revealed.
+  // the dice is still spinning or before its result has been revealed.
   useEffect(() => {
     if (turnTimeLeft > 0) return;
     if (!mounted || inLobby || startCountdown > 0 || gameState.status !== 'playing' || gameState.winner) return;
@@ -606,16 +629,21 @@ function GameContent() {
       return;
     }
 
-    // A roll is pending: wait until the dice animation ends and the number shows.
+    // A move is pending: wait until the dice animation ends and the number shows.
     if (gameState.dice.rolling || !diceSettled || gameState.dice.value === null) return;
 
     timerKeyRef.current += 1;
-    doAction({ type: 'PASS_TURN' });
+    // Auto-move using best bot strategy instead of blindly passing the turn
+    const bestMove = getBestBotMove(gameState, currentPlayer.color, gameState.dice.value);
+    if (bestMove) {
+      soundEngine.playTokenMove();
+      doAction({ type: 'SELECT_TOKEN', targetTokenId: bestMove.tokenId });
+    } else {
+      doAction({ type: 'PASS_TURN' });
+    }
   }, [turnTimeLeft, diceSettled, mounted, inLobby, startCountdown, gameState, currentPlayer, doAction]);
 
   // Match end & victory persistence: record win/loss, update local profile, post to DB & sync stats
-  const victoryRecordedRef = useRef<string | null>(null);
-
   useEffect(() => {
     const winner = gameState.winner;
     if (!winner) {
@@ -1396,8 +1424,17 @@ function GameContent() {
               myColor={localColor}
               players={gameState.players}
               onPlayAgain={() => {
+                // Reset all tracking refs so new game state is accepted
+                lastGameSig.current = '';
+                victoryRecordedRef.current = null;
+                botActedRef.current = '';
                 localStorage.removeItem(storageKey);
-                doAction({ type: 'START_GAME' });
+                // Rebuild fresh seats then restore to a brand-new initial state
+                const freshSeats = buildSeats(profile, defaultSeats);
+                setPlayers(freshSeats);
+                const freshState = createInitialGameState(freshSeats, roomCode);
+                dispatch({ type: 'RESTORE_GAME', state: freshState });
+                setTurnTimeLeft(TURN_TIMEOUT_SECONDS);
               }}
               onReturnHome={handleLeaveRoom}
             />

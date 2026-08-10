@@ -214,3 +214,92 @@ export async function apiRoomAction(
   if (!res.ok) throw new Error(data.error || 'Action failed');
   return data;
 }
+
+// ---- Web Push Notification Helpers ----
+
+/**
+ * Fetches the VAPID public key from the server.
+ */
+export async function apiGetVapidPublicKey(): Promise<string> {
+  const res = await fetch('/api/notify');
+  const data = await res.json().catch(() => ({}));
+  return data.publicKey || '';
+}
+
+/**
+ * Registers a Push subscription with the server so invite notifications
+ * can be sent to this device later.
+ */
+export async function apiRegisterPushSubscription(
+  deviceId: string,
+  subscription: PushSubscription
+): Promise<void> {
+  try {
+    await fetch('/api/rooms/push-subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceId, subscription: subscription.toJSON() }),
+    });
+  } catch {
+    // Non-critical — ignore if server doesn't support it yet
+  }
+}
+
+/**
+ * Sends a match invitation push notification.
+ * Works by POSTing the subscription + payload directly to /api/notify.
+ */
+export async function apiSendInviteNotification(params: {
+  subscription: PushSubscriptionJSON;
+  senderName: string;
+  roomCode: string;
+}): Promise<void> {
+  const { subscription, senderName, roomCode } = params;
+  await fetch('/api/notify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      subscription,
+      title: `🎲 ${senderName} invited you to Ludo!`,
+      message: `Join room ${roomCode} for a match. Tap to play now!`,
+      roomCode,
+    }),
+  });
+}
+
+/**
+ * Registers the service worker and returns a PushSubscription,
+ * or null if notifications are not supported / denied.
+ */
+export async function registerServiceWorker(): Promise<PushSubscription | null> {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return null;
+  }
+  try {
+    const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+    await navigator.serviceWorker.ready;
+
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return null;
+
+    const vapidKey = await apiGetVapidPublicKey();
+    if (!vapidKey) return null;
+
+    // Convert base64 VAPID key to Uint8Array
+    const urlB64ToUint8Array = (base64String: string) => {
+      const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+      const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+      const rawData = window.atob(base64);
+      return new Uint8Array([...rawData].map((c) => c.charCodeAt(0)));
+    };
+
+    const subscription = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlB64ToUint8Array(vapidKey),
+    });
+
+    return subscription;
+  } catch {
+    return null;
+  }
+}

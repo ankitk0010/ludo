@@ -1,6 +1,6 @@
 import { GameState, Player, PlayerColor, PowerCardType, Token } from './types';
 import { PLAYER_COLORS, TOTAL_STEPS_TO_FINISH } from './constants';
-import { getGlobalTrackPosition } from './board';
+import { getGlobalTrackPosition, isSafeCell } from './board';
 import { getLegalMoves, hasLegalMoves } from './movement';
 import { consumePowerCard } from './powerCards';
 
@@ -293,7 +293,9 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       const targetGlobalPos = chosenMove.targetGlobalPos;
       const newTokensState: Record<PlayerColor, Token[]> = { ...state.tokens };
 
-      if (chosenMove.causesCapture && targetGlobalPos !== -1) {
+      // Re-verify capture at execution time — guards against double-dispatch
+      // (optimistic local + server authoritative) firing two captures.
+      if (chosenMove.causesCapture && targetGlobalPos !== -1 && !isSafeCell(targetGlobalPos)) {
         for (const [otherColor, tokens] of Object.entries(state.tokens)) {
           if (otherColor === currentColor) continue;
           const matchIdx = tokens.findIndex(
@@ -319,6 +321,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
           }
         }
       }
+
 
       // Update current player's token
       const updatedCurrentTokens = newTokensState[currentColor].map((t) =>
