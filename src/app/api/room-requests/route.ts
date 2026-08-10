@@ -107,6 +107,7 @@ export async function POST(request: Request) {
     const target = await prisma.user.findFirst({
       where: {
         OR: [
+          { id: username },
           { username: { equals: username, mode: 'insensitive' } },
           { displayName: { equals: username, mode: 'insensitive' } },
         ],

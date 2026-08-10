@@ -118,10 +118,12 @@ export const LobbySocial: React.FC<LobbySocialProps> = ({
 
   const sendInvite = async (friend: FriendUser) => {
     if (!token) return;
+    const targetIdentifier = (friend.username || friend.displayName || friend.id || '').trim();
+    if (!targetIdentifier) return;
     setBusyId(friend.id);
     setError(null);
     try {
-      await apiSendRoomRequest(token, { roomCode, username: friend.username });
+      await apiSendRoomRequest(token, { roomCode, username: targetIdentifier });
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not send invite');
