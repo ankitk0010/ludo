@@ -178,6 +178,13 @@ export async function apiSendLiveVoice(
   }).catch(() => {});
 }
 
+export async function apiPingRoom(): Promise<number> {
+  const start = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  await fetch('/api/rooms/ping', { cache: 'no-store' }).catch(() => {});
+  const end = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  return Math.round(end - start);
+}
+
 export async function apiRoomStart(
   code: string,
   deviceId: string

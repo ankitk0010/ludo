@@ -28,7 +28,7 @@ import { LobbyRoom } from '@/components/lobby/LobbyRoom';
 import { LobbySocial } from '@/components/lobby/LobbySocial';
 import { OpponentStrip } from '@/components/game/OpponentStrip';
 import { OpponentProfileSheet } from '@/components/profile/OpponentProfileSheet';
-import { soundEngine, refreshSfxOverrides } from '@/components/sound/soundEngine';
+import { soundEngine, refreshSfxOverrides, setupAudioUnlockListener } from '@/components/sound/soundEngine';
 import { AudioSettings } from '@/components/sound/AudioSettings';
 import { useVoiceMic } from '@/components/sound/useVoiceMic';
 import { ProfileDrawer } from '@/components/profile/ProfileDrawer';
@@ -50,6 +50,7 @@ import {
   apiRoomStart,
   apiRoomAction,
   apiSendLiveVoice,
+  apiPingRoom,
   subscribeRoomStream,
   RoomVoiceMessage,
 } from '@/lib/roomClient';
@@ -218,10 +219,26 @@ function GameContent() {
   // Browser back-button guard: warn before leaving an active match.
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
 
-  // Load the admin-managed custom SFX audio (if any).
+  const [pingMs, setPingMs] = useState<number | null>(null);
+
+  // Setup iOS / Safari WebAudio unlocker & load custom SFX
   useEffect(() => {
+    setupAudioUnlockListener();
     void refreshSfxOverrides();
   }, []);
+
+  // Real-time Ping Latency Monitor (probes every 3.5s in room mode)
+  useEffect(() => {
+    if (!mounted || mode !== 'room') return;
+    const probe = () => {
+      apiPingRoom()
+        .then((rtt) => setPingMs(rtt))
+        .catch(() => {});
+    };
+    probe();
+    const timer = setInterval(probe, 3500);
+    return () => clearInterval(timer);
+  }, [mounted, mode]);
 
   const handleSpeakerToggle = () => setSpeakerMuted((m) => !m);
 
@@ -936,10 +953,28 @@ function GameContent() {
                   <span className="text-lg leading-none">🎲</span>
                   <span className="font-extrabold text-[11px] tracking-tight hidden sm:inline">LUDO</span>
                 </div>
-                <div className="bg-slate-950/80 px-2 py-1 rounded-full border border-slate-800 text-[9px] font-bold text-slate-300 flex items-center gap-1 shrink-0">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <span className="hidden sm:inline">ROOM:</span>{' '}
-                  <span className="text-amber-400 font-extrabold">{roomCode}</span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="bg-slate-950/80 px-2 py-1 rounded-full border border-slate-800 text-[9px] font-bold text-slate-300 flex items-center gap-1 shrink-0">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="hidden sm:inline">ROOM:</span>{' '}
+                    <span className="text-amber-400 font-extrabold">{roomCode}</span>
+                  </div>
+                  {mode === 'room' && pingMs !== null && (
+                    <div
+                      className="px-2 py-1 rounded-full border text-[9px] font-black flex items-center gap-1 shrink-0 bg-slate-950/90 shadow-sm"
+                      style={{
+                        borderColor: pingMs < 80 ? 'rgba(52, 211, 153, 0.4)' : pingMs < 160 ? 'rgba(251, 191, 36, 0.4)' : 'rgba(248, 113, 113, 0.4)',
+                        color: pingMs < 80 ? '#34d399' : pingMs < 160 ? '#fbbf24' : '#f87171',
+                      }}
+                      title={`Network Ping: ${pingMs} ms`}
+                    >
+                      <span
+                        className="w-1.5 h-1.5 rounded-full animate-pulse"
+                        style={{ background: pingMs < 80 ? '#34d399' : pingMs < 160 ? '#fbbf24' : '#f87171' }}
+                      />
+                      <span>{pingMs}ms</span>
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-1.5">
                   <button
@@ -1050,10 +1085,28 @@ function GameContent() {
               </div>
             </div>
 
-            <div className="bg-slate-950/80 px-2 py-1 rounded-full border border-slate-800 text-[9px] font-bold text-slate-300 flex items-center gap-1 shrink-0">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="hidden sm:inline">ROOM:</span>{' '}
-              <span className="text-amber-400 font-extrabold">{roomCode}</span>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <div className="bg-slate-950/80 px-2 py-1 rounded-full border border-slate-800 text-[9px] font-bold text-slate-300 flex items-center gap-1 shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="hidden sm:inline">ROOM:</span>{' '}
+                <span className="text-amber-400 font-extrabold">{roomCode}</span>
+              </div>
+              {mode === 'room' && pingMs !== null && (
+                <div
+                  className="px-2 py-1 rounded-full border text-[9px] font-black flex items-center gap-1 shrink-0 bg-slate-950/90 shadow-sm"
+                  style={{
+                    borderColor: pingMs < 80 ? 'rgba(52, 211, 153, 0.4)' : pingMs < 160 ? 'rgba(251, 191, 36, 0.4)' : 'rgba(248, 113, 113, 0.4)',
+                    color: pingMs < 80 ? '#34d399' : pingMs < 160 ? '#fbbf24' : '#f87171',
+                  }}
+                  title={`Network Ping: ${pingMs} ms`}
+                >
+                  <span
+                    className="w-1.5 h-1.5 rounded-full animate-pulse"
+                    style={{ background: pingMs < 80 ? '#34d399' : pingMs < 160 ? '#fbbf24' : '#f87171' }}
+                  />
+                  <span>{pingMs}ms</span>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-1.5">

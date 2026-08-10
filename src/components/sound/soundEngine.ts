@@ -17,6 +17,47 @@ export async function refreshSfxOverrides(): Promise<void> {
   }
 }
 
+let globalAudioUnlocked = false;
+let globalUnlockedCtx: AudioContext | null = null;
+
+export function getUnlockedAudioContext(): AudioContext {
+  if (!globalUnlockedCtx || globalUnlockedCtx.state === 'closed') {
+    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    globalUnlockedCtx = new AudioCtx();
+  }
+  if (globalUnlockedCtx.state === 'suspended') {
+    void globalUnlockedCtx.resume().catch(() => {});
+  }
+  return globalUnlockedCtx;
+}
+
+export function setupAudioUnlockListener(): void {
+  if (typeof window === 'undefined' || globalAudioUnlocked) return;
+
+  const unlock = () => {
+    try {
+      const ctx = getUnlockedAudioContext();
+      if (ctx.state === 'suspended') {
+        void ctx.resume();
+      }
+      const buffer = ctx.createBuffer(1, 1, 22050);
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.start(0);
+      globalAudioUnlocked = true;
+    } catch {}
+
+    window.removeEventListener('touchstart', unlock);
+    window.removeEventListener('touchend', unlock);
+    window.removeEventListener('click', unlock);
+  };
+
+  window.addEventListener('touchstart', unlock, { passive: true, once: true });
+  window.addEventListener('touchend', unlock, { passive: true, once: true });
+  window.addEventListener('click', unlock, { passive: true, once: true });
+}
+
 function sfxUrl(key: string): string | null {
   return (sfxOverrideCache && sfxOverrideCache.get(key)) || null;
 }

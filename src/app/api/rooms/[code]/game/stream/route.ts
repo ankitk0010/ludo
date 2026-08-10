@@ -4,11 +4,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /*
- * GET /api/rooms/[code]/game/stream — Server-Sent Events.
- * Subscribes to the in-memory room bus and pushes every authoritative state
- * change / voice message as soon as it happens, so clients stop lagging a
- * whole poll interval behind the action. The client keeps a slow poll as a
- * fallback for missed events / multi-instance deployments.
+ * GET /api/rooms/[code]/game/stream — Low-latency Server-Sent Events.
+ * Pushes game state & live voice PCM packets directly from RAM.
  */
 export async function GET(
   request: Request,
@@ -17,6 +14,8 @@ export async function GET(
   const { code } = await params;
   const key = code.toUpperCase();
   const encoder = new TextEncoder();
+
+  let keepAliveTimer: ReturnType<typeof setInterval> | null = null;
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -27,8 +26,20 @@ export async function GET(
           /* client went away */
         }
       };
+
       const unsubscribe = subscribeRoom(key, send);
+
+      // Heartbeat comment every 15s to keep proxy connections alive
+      keepAliveTimer = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(`:ping\n\n`));
+        } catch {
+          /* connection closed */
+        }
+      }, 15000);
+
       request.signal.addEventListener('abort', () => {
+        if (keepAliveTimer) clearInterval(keepAliveTimer);
         unsubscribe();
         try {
           controller.close();
@@ -38,15 +49,16 @@ export async function GET(
       });
     },
     cancel() {
-      /* listener cleanup happens via the abort signal */
+      if (keepAliveTimer) clearInterval(keepAliveTimer);
     },
   });
 
   return new Response(stream, {
     headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform, no-store, must-revalidate',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
     },
   });
 }
