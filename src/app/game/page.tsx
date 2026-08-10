@@ -1393,6 +1393,7 @@ function GameContent() {
           {gameState.winner && (
             <VictoryModal
               winnerColor={gameState.winner}
+              myColor={localColor}
               players={gameState.players}
               onPlayAgain={() => {
                 localStorage.removeItem(storageKey);
