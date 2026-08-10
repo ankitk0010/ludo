@@ -32,7 +32,7 @@ export function getUnlockedAudioContext(): AudioContext {
 }
 
 export function setupAudioUnlockListener(): void {
-  if (typeof window === 'undefined' || globalAudioUnlocked) return;
+  if (typeof window === 'undefined') return;
 
   const unlock = () => {
     try {
@@ -45,17 +45,25 @@ export function setupAudioUnlockListener(): void {
       source.buffer = buffer;
       source.connect(ctx.destination);
       source.start(0);
+
+      if (soundEngine) {
+        soundEngine.init();
+      }
+
+      if ('speechSynthesis' in window) {
+        try {
+          window.speechSynthesis.getVoices();
+        } catch {}
+      }
+
       globalAudioUnlocked = true;
     } catch {}
-
-    window.removeEventListener('touchstart', unlock);
-    window.removeEventListener('touchend', unlock);
-    window.removeEventListener('click', unlock);
   };
 
-  window.addEventListener('touchstart', unlock, { passive: true, once: true });
-  window.addEventListener('touchend', unlock, { passive: true, once: true });
-  window.addEventListener('click', unlock, { passive: true, once: true });
+  window.addEventListener('touchstart', unlock, { passive: true });
+  window.addEventListener('touchend', unlock, { passive: true });
+  window.addEventListener('pointerdown', unlock, { passive: true });
+  window.addEventListener('click', unlock, { passive: true });
 }
 
 function sfxUrl(key: string): string | null {
@@ -93,7 +101,7 @@ class SoundEngine {
     return true;
   }
 
-  private init() {
+  public init() {
     if (!this.ctx && typeof window !== 'undefined') {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (AudioCtx) {

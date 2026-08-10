@@ -29,18 +29,22 @@ export function invalidateRoomCache(code: string): void {
 }
 
 /** Update heartbeat timestamp for a player device in a room */
-export function touchPlayerPresence(code: string, deviceId: string): void {
-  if (!code || !deviceId) return;
+export function touchPlayerPresence(code: string, identifier: string): void {
+  if (!code || !identifier) return;
   let map = roomPresence.get(code);
   if (!map) {
     map = new Map();
     roomPresence.set(code, map);
   }
-  map.set(deviceId, Date.now());
+  const now = Date.now();
+  map.set(identifier, now);
+  map.set(identifier.toLowerCase(), now);
 }
 
+const OFFLINE_TIMEOUT_MS = 45000; // 45 seconds timeout (never falsely disconnect active players)
+
 /**
- * Check if any player has gone silent (>12s without heartbeat/action)
+ * Check if any player has gone silent (>45s without heartbeat/action)
  * and automatically handle offline status / last remaining player victory.
  */
 export async function checkRoomPresenceAndDisconnects(code: string): Promise<RoomCacheEntry | null> {
@@ -56,9 +60,15 @@ export async function checkRoomPresenceAndDisconnects(code: string): Promise<Roo
 
   const updatedPlayers = state.players.map((p) => {
     if (p.isBot || !p.connected) return p;
-    // Check if player ID (deviceId) has been silent for >12 seconds
-    const lastSeen = map.get(p.id) ?? now;
-    if (now - lastSeen > 12000) {
+    // Check presence using all possible identifiers (id, deviceId, name)
+    const lastSeen =
+      map.get(p.id) ??
+      map.get((p as unknown as { deviceId?: string }).deviceId || '') ??
+      map.get(p.name) ??
+      map.get(p.name.toLowerCase()) ??
+      now;
+
+    if (now - lastSeen > OFFLINE_TIMEOUT_MS) {
       modified = true;
       return { ...p, connected: false };
     }
