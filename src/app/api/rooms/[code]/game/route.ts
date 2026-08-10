@@ -88,6 +88,28 @@ export async function POST(
     const entry = await loadRoom(key);
     if (!entry) return NextResponse.json({ error: 'Room not found' }, { status: 404 });
 
+    // ---- Live Microphone Voice Stream Relay ----
+    if (body.liveVoice) {
+      const lv = body.liveVoice;
+      if (typeof lv.audioBase64 === 'string' && entry.state) {
+        const sender = entry.state.players.find((p) => p.id === deviceId);
+        if (sender) {
+          const chunk = {
+            id: `v_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            byDeviceId: deviceId,
+            byName: sender.name,
+            byColor: sender.color,
+            audioBase64: lv.audioBase64,
+            mimeType: typeof lv.mimeType === 'string' ? lv.mimeType : 'audio/webm',
+            at: Date.now(),
+          };
+          emitRoom(key, { type: 'live_voice', chunk });
+          return NextResponse.json({ ok: true });
+        }
+      }
+      return NextResponse.json({ ok: false }, { status: 400 });
+    }
+
     // ---- Voice line relay (delivered to the other players) ----
     if (body.voice) {
       const room = await prisma.gameRoom.findUnique({
@@ -116,11 +138,14 @@ export async function POST(
       const list = [...entry.voiceMessages, msg].slice(-MAX_VOICE);
       entry.voiceMessages = list;
       entry.at = Date.now();
-      await prisma.gameRoom.update({
+
+      // Emit SSE immediately, persist DB asynchronously
+      emitRoom(key, { type: 'voice', voiceMessages: list });
+      prisma.gameRoom.update({
         where: { id: room.id },
         data: { voiceMessages: list as unknown as Prisma.InputJsonValue },
-      });
-      emitRoom(key, { type: 'voice', voiceMessages: list });
+      }).catch((e) => console.error('Async DB update error:', e));
+
       return NextResponse.json({ voiceMessages: list });
     }
 
@@ -148,11 +173,14 @@ export async function POST(
       entry.status = 'PLAYING';
       entry.state = state;
       entry.at = Date.now();
-      await prisma.gameRoom.update({
+
+      // Emit SSE immediately, persist DB asynchronously
+      emitRoom(key, { type: 'state', status: 'PLAYING', state });
+      prisma.gameRoom.update({
         where: { id: room.id },
         data: { status: 'PLAYING', state: state as unknown as Prisma.InputJsonValue },
-      });
-      emitRoom(key, { type: 'state', status: 'PLAYING', state });
+      }).catch((e) => console.error('Async DB update error:', e));
+
       return NextResponse.json({ state, players: seats });
     }
 
@@ -176,11 +204,14 @@ export async function POST(
 
     entry.state = res.state;
     entry.at = Date.now();
-    await prisma.gameRoom.update({
+
+    // Memory-first fast broadcast: emit SSE right away for 0ms lag across connected clients!
+    emitRoom(key, { type: 'state', status: 'PLAYING', state: res.state });
+    prisma.gameRoom.update({
       where: { id: entry.id },
       data: { state: res.state as unknown as Prisma.InputJsonValue },
-    });
-    emitRoom(key, { type: 'state', status: 'PLAYING', state: res.state });
+    }).catch((e) => console.error('Async DB update error:', e));
+
     return NextResponse.json({ state: res.state, players: res.state.players });
   } catch (error) {
     console.error('Room game action failed:', error);

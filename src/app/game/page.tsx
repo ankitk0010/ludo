@@ -49,6 +49,7 @@ import {
   apiRoomState,
   apiRoomStart,
   apiRoomAction,
+  apiSendLiveVoice,
   subscribeRoomStream,
   RoomVoiceMessage,
 } from '@/lib/roomClient';
@@ -118,12 +119,6 @@ function GameContent() {
   const [turnTimeLeft, setTurnTimeLeft] = useState(TURN_TIMEOUT_SECONDS);
   const [settings] = useState<GameSettings>(() => loadSettings());
   const [profile, setProfile] = useState<PlayerProfile>(() => loadProfile());
-  const mic = useVoiceMic();
-  const meSpeaking = mic.speaking;
-  const [speakerMuted, setSpeakerMuted] = useState(false);
-  const timerKeyRef = useRef(0);
-  const [diceSettled, setDiceSettled] = useState(false);
-  const fitBoard = useFitBoard();
 
   // ---- Online room sync (mode === 'room') ----
   const deviceId = useMemo(getDeviceId, []);
@@ -132,6 +127,26 @@ function GameContent() {
   const roomJoinedRef = useRef(false);
   const [roomAttempt, setRoomAttempt] = useState(0);
   const [viewProfile, setViewProfile] = useState<Player | null>(null);
+
+  // Live microphone audio stream handler
+  const handleLiveAudioChunk = useCallback(
+    (base64: string, mimeType: string) => {
+      if (mode === 'room' && !inLobby) {
+        apiSendLiveVoice(roomCode, deviceId, base64, mimeType);
+      }
+    },
+    [mode, inLobby, roomCode, deviceId]
+  );
+
+  const mic = useVoiceMic({ onAudioChunk: handleLiveAudioChunk });
+  const meSpeaking = mic.speaking;
+  const [remoteSpeakingColor, setRemoteSpeakingColor] = useState<string | null>(null);
+  const remoteSpeakingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [speakerMuted, setSpeakerMuted] = useState(false);
+  const timerKeyRef = useRef(0);
+  const [diceSettled, setDiceSettled] = useState(false);
+  const fitBoard = useFitBoard();
 
   // Mirrors `inLobby` so the SSE callback can read it without re-subscribing.
   const inLobbyRef = useRef(inLobby);
@@ -228,21 +243,27 @@ function GameContent() {
     []
   );
 
-  // Route gameplay actions through the authoritative server when playing an
-  // online room, so every client sees the same board and only the owner of the
-  // current seat acts. Local modes dispatch straight into the local engine.
+  // Optimistic turn action execution: Dispatch locally immediately so the UI
+  // responds in 0ms (no freezing or lag on dice rolls / token moves), while sending
+  // the action to the server asynchronously.
   const doAction = useCallback(
     (action: GameAction) => {
+      dispatch(action);
+
       if (mode === 'room' && !inLobby) {
         apiRoomAction(roomCode, deviceId, action)
           .then((res) => {
             if (!res.state) return;
             applyServerState(res.state);
           })
-          .catch(() => {});
-        return;
+          .catch(() => {
+            apiRoomState(roomCode)
+              .then((s) => {
+                if (s.state) applyServerState(s.state);
+              })
+              .catch(() => {});
+          });
       }
-      dispatch(action);
     },
     [mode, inLobby, roomCode, deviceId, applyServerState]
   );
@@ -297,10 +318,22 @@ function GameContent() {
         applyServerState(event.state);
       } else if (event.type === 'voice') {
         ingestVoice(event.voiceMessages);
+      } else if (event.type === 'live_voice') {
+        const chunk = event.chunk;
+        if (chunk.byDeviceId !== deviceId && !speakerMuted) {
+          setRemoteSpeakingColor(chunk.byColor);
+          if (remoteSpeakingTimerRef.current) clearTimeout(remoteSpeakingTimerRef.current);
+          remoteSpeakingTimerRef.current = setTimeout(() => setRemoteSpeakingColor(null), 1200);
+
+          try {
+            const audio = new Audio(`data:${chunk.mimeType};base64,${chunk.audioBase64}`);
+            audio.play().catch(() => {});
+          } catch {}
+        }
       }
     });
     return unsubscribe;
-  }, [mounted, mode, roomCode, roomError, applyServerState, ingestVoice, beginStartCountdown]);
+  }, [mounted, mode, roomCode, roomError, speakerMuted, deviceId, applyServerState, ingestVoice, beginStartCountdown]);
 
   // ---- Lobby: slow poll as a safety net / for joiners on other instances ----
   useEffect(() => {
@@ -414,7 +447,7 @@ function GameContent() {
     return map;
   }, [gameState.tokens]);
 
-  const speakingSeat = meSpeaking ? localColor : undefined;
+  const speakingSeat = meSpeaking ? localColor : remoteSpeakingColor || undefined;
   const opponents = gameState.players.filter((p) => p.id !== myPlayerId);
 
   // Room invite link used by the lobby share button and player profile sheets.

@@ -8,7 +8,9 @@ import { voiceEngine } from './voiceEvents';
  * speaking detection via voiceEngine. Used by the in-game voice controls and
  * the profile sheet so both share a single source of truth.
  */
-export function useVoiceMic() {
+export function useVoiceMic(options?: {
+  onAudioChunk?: (base64: string, mimeType: string) => void;
+}) {
   const [micOn, setMicOn] = useState(false);
   const [micBusy, setMicBusy] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
@@ -16,8 +18,15 @@ export function useVoiceMic() {
 
   const streamRef = useRef<MediaStream | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
   const rafRef = useRef<number | null>(null);
   const ownedRef = useRef(false);
+  const speakingRef = useRef(false);
+  const onAudioChunkRef = useRef(options?.onAudioChunk);
+
+  useEffect(() => {
+    onAudioChunkRef.current = options?.onAudioChunk;
+  }, [options?.onAudioChunk]);
 
   // Mirror voiceEngine speaking state (driven by any active mic loop).
   useEffect(() => voiceEngine.subscribe(setSpeaking), []);
@@ -25,9 +34,15 @@ export function useVoiceMic() {
   useEffect(() => {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+        try {
+          recorderRef.current.stop();
+        } catch {}
+      }
       if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
       analyserRef.current = null;
+      recorderRef.current = null;
       if (ownedRef.current) {
         ownedRef.current = false;
         voiceEngine.setActive(false);
@@ -52,7 +67,9 @@ export function useVoiceMic() {
         sum += v * v;
       }
       const level = Math.sqrt(sum / (data.length / 8));
-      voiceEngine.setSpeaking(level > 0.06);
+      const isSpeakingNow = level > 0.05;
+      speakingRef.current = isSpeakingNow;
+      voiceEngine.setSpeaking(isSpeakingNow);
       rafRef.current = requestAnimationFrame(loop);
     };
     loop();
@@ -65,9 +82,15 @@ export function useVoiceMic() {
   const toggleMic = useCallback(async () => {
     if (micOn) {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+        try {
+          recorderRef.current.stop();
+        } catch {}
+      }
       if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
       analyserRef.current = null;
+      recorderRef.current = null;
       ownedRef.current = false;
       voiceEngine.setActive(false);
       setMicOn(false);
@@ -87,6 +110,37 @@ export function useVoiceMic() {
       analyser.fftSize = 512;
       source.connect(analyser);
       analyserRef.current = analyser;
+
+      // Start MediaRecorder for live voice audio transmission
+      if (typeof MediaRecorder !== 'undefined') {
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : MediaRecorder.isTypeSupported('audio/webm')
+            ? 'audio/webm'
+            : MediaRecorder.isTypeSupported('audio/mp4')
+              ? 'audio/mp4'
+              : '';
+
+        const recorderOptions = mimeType ? { mimeType } : undefined;
+        const recorder = new MediaRecorder(stream, recorderOptions);
+
+        recorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0 && speakingRef.current && onAudioChunkRef.current) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const result = reader.result as string;
+              if (result) {
+                const base64 = result.split(',')[1] || result;
+                onAudioChunkRef.current?.(base64, recorder.mimeType || mimeType || 'audio/webm');
+              }
+            };
+            reader.readAsDataURL(e.data);
+          }
+        };
+        recorder.start(350); // 350ms audio slices
+        recorderRef.current = recorder;
+      }
+
       voiceEngine.setActive(true);
       setMicOn(true);
     } catch {

@@ -12,9 +12,20 @@ export interface RoomVoiceMessage {
   at: number;
 }
 
+export interface RoomLiveVoiceChunk {
+  id: string;
+  byDeviceId: string;
+  byName: string;
+  byColor: string;
+  audioBase64: string;
+  mimeType: string;
+  at: number;
+}
+
 export type RoomStreamEvent =
   | { type: 'state'; status: string; state: GameState | null }
-  | { type: 'voice'; voiceMessages: RoomVoiceMessage[] };
+  | { type: 'voice'; voiceMessages: RoomVoiceMessage[] }
+  | { type: 'live_voice'; chunk: RoomLiveVoiceChunk };
 
 type Listener = (event: RoomStreamEvent) => void;
 

@@ -165,6 +165,19 @@ export async function apiRoomVoice(
   return data;
 }
 
+export async function apiSendLiveVoice(
+  code: string,
+  deviceId: string,
+  audioBase64: string,
+  mimeType = 'audio/webm'
+): Promise<void> {
+  await fetch(`/api/rooms/${encodeURIComponent(code)}/game`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deviceId, liveVoice: { audioBase64, mimeType } }),
+  }).catch(() => {});
+}
+
 export async function apiRoomStart(
   code: string,
   deviceId: string

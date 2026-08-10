@@ -139,6 +139,55 @@ export function advanceTurn(state: GameState, extraTurn = false, logMessage?: st
   };
 }
 
+/**
+ * Generates a fair, cryptographically strong Ludo dice value (1-6).
+ * Includes an anti-stuck (pity) mechanism: if all 4 of a player's tokens are stuck in home,
+ * progressive weighting is applied after multiple non-6 rolls so players don't get locked out.
+ */
+export function generateLudoDiceValue(state: GameState, color: PlayerColor): number {
+  // Cryptographic random float in [0, 1)
+  let rand = Math.random();
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const array = new Uint32Array(1);
+    crypto.getRandomValues(array);
+    rand = array[0] / (0xffffffff + 1);
+  }
+
+  const colorTokens = state.tokens[color] || [];
+  const allInHome = colorTokens.length > 0 && colorTokens.every((t) => t.status === 'home');
+
+  if (allInHome) {
+    // Count recent rolls by this color without getting a 6
+    let consecutiveNoSix = 0;
+    const playerLogPattern = `${color.toUpperCase()})`;
+    for (let i = state.logs.length - 1; i >= 0; i--) {
+      const log = state.logs[i];
+      if (log.includes(playerLogPattern) || log.toLowerCase().includes(color)) {
+        if (log.includes('rolled a 6')) {
+          break;
+        }
+        if (log.includes('rolled a ')) {
+          consecutiveNoSix++;
+        }
+      }
+    }
+
+    // Apply pity boost if stuck at home for 3+ rolls
+    if (consecutiveNoSix >= 5) {
+      // 50% chance of 6 if stuck 5+ turns
+      if (rand < 0.5) return 6;
+      rand = (rand - 0.5) * 2;
+    } else if (consecutiveNoSix >= 3) {
+      // 35% chance of 6 if stuck 3-4 turns
+      if (rand < 0.35) return 6;
+      rand = (rand - 0.35) / 0.65;
+    }
+  }
+
+  // Standard uniform distribution across 1 to 6
+  return Math.floor(rand * 6) + 1;
+}
+
 export function gameReducer(state: GameState, action: GameAction): GameState {
   if (state.winner) return state;
 
@@ -152,7 +201,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     case 'ROLL_DICE': {
       if (state.dice.mustMove) return state; // Must make move first
 
-      const rolledValue = action.overrideValue || Math.floor(Math.random() * 6) + 1;
+      const rolledValue = action.overrideValue || generateLudoDiceValue(state, currentColor);
       const isSix = rolledValue === 6;
       const consecutiveSixes = isSix ? state.dice.consecutiveSixes + 1 : 0;
 
