@@ -108,6 +108,18 @@ export const VoiceAdminPanel: React.FC = () => {
   };
 
   const uploadFile = async (file: File): Promise<string | null> => {
+    const MAX_SIZE = 2.5 * 1024 * 1024;
+    if (file.size > MAX_SIZE) {
+      setError(`File "${file.name}" is too large (${(file.size / (1024 * 1024)).toFixed(1)}MB). Maximum size limit is 2.5MB.`);
+      return null;
+    }
+    const validExts = ['mp3', 'wav', 'ogg', 'm4a', 'mp4', 'webm', 'aac'];
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (!file.type.startsWith('audio/') && !validExts.includes(ext || '')) {
+      setError(`Invalid file type "${file.name}". Please upload a valid audio file (MP3, WAV, OGG, M4A, WEBM).`);
+      return null;
+    }
+
     const t = token || (await auth());
     if (!t) return null;
     const fd = new FormData();
@@ -232,6 +244,19 @@ export const VoiceAdminPanel: React.FC = () => {
         <h1 className="text-lg font-black text-white">🎙️ Voice Library</h1>
         <span className="text-[10px] font-bold text-slate-400">{sortText().length} phrases</span>
       </div>
+      {/* Upload Instructions & Requirements Banner */}
+      <div className="mt-3 bg-purple-950/40 border border-purple-500/30 rounded-2xl p-3.5 text-xs text-purple-200">
+        <div className="font-extrabold text-purple-300 flex items-center gap-1.5 mb-1">
+          <span>🎙️</span> VOICE PHRASE UPLOADS & RESTRICTIONS
+        </div>
+        <ul className="list-disc list-inside space-y-1 text-[11px] text-purple-200/90 font-medium">
+          <li><strong>Allowed Formats:</strong> MP3, WAV, OGG, M4A, WEBM audio files.</li>
+          <li><strong>Size Restriction:</strong> Maximum <strong>2.5MB</strong> per file.</li>
+          <li><strong>Recommended Clip Duration:</strong> 1s to 4s spoken reactions.</li>
+          <li><strong>In-Match Execution:</strong> Custom voice lines play in online matches when players tap voice reactions.</li>
+        </ul>
+      </div>
+
       {error && (
         <div className="mt-2 text-[11px] text-red-400 font-bold bg-red-500/10 border border-red-500/30 rounded-xl px-3 py-2">{error}</div>
       )}

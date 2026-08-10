@@ -68,6 +68,19 @@ export const SfxAdminPanel: React.FC = () => {
       setError('Sign in as admin first');
       return;
     }
+
+    const MAX_SIZE = 2.5 * 1024 * 1024;
+    if (file.size > MAX_SIZE) {
+      setError(`File "${file.name}" is too large (${(file.size / (1024 * 1024)).toFixed(1)}MB). Maximum size limit is 2.5MB.`);
+      return;
+    }
+    const validExts = ['mp3', 'wav', 'ogg', 'm4a', 'mp4', 'webm', 'aac'];
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (!file.type.startsWith('audio/') && !validExts.includes(ext || '')) {
+      setError(`Invalid file type "${file.name}". Please upload a valid audio file (MP3, WAV, OGG, M4A, WEBM).`);
+      return;
+    }
+
     setBusyKey(key);
     setError(null);
     try {
@@ -141,7 +154,21 @@ export const SfxAdminPanel: React.FC = () => {
         </h2>
         <span className="text-[10px] font-bold text-slate-400">upload audio from your device</span>
       </div>
-      {error && <div className="mt-2 text-[11px] font-bold text-red-400 bg-red-500/10 border border-red-500/30 rounded-xl px-3 py-2">{error}</div>}
+
+      {/* Upload Instructions & Requirements Banner */}
+      <div className="mt-3 bg-sky-950/40 border border-sky-500/30 rounded-2xl p-3.5 text-xs text-sky-200">
+        <div className="font-extrabold text-sky-300 flex items-center gap-1.5 mb-1">
+          <span>🎵</span> SFX UPLOADS & RESTRICTIONS
+        </div>
+        <ul className="list-disc list-inside space-y-1 text-[11px] text-sky-200/90 font-medium">
+          <li><strong>Allowed Formats:</strong> MP3, WAV, OGG, M4A, WEBM audio files.</li>
+          <li><strong>Size Restriction:</strong> Maximum <strong>2.5MB</strong> per file.</li>
+          <li><strong>Recommended Duration:</strong> 0.5s to 3s per game action.</li>
+          <li><strong>Live Gameplay Integration:</strong> Uploaded SFX clips replace built-in sounds in live matches.</li>
+        </ul>
+      </div>
+
+      {error && <div className="mt-3 text-[11px] font-bold text-red-400 bg-red-500/10 border border-red-500/30 rounded-xl px-3 py-2">{error}</div>}
 
       <div className="mt-3 space-y-1.5">
         {entries.map((e) => (

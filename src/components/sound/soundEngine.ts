@@ -147,6 +147,7 @@ class SoundEngine {
 
   public playClick() {
     if (this.muted) return;
+    if (this.playCustom('click')) return;
     this.init();
     if (!this.ctx) return;
 
@@ -168,6 +169,7 @@ class SoundEngine {
 
   public playDiceRoll() {
     if (this.muted) return;
+    if (this.playCustom('dice_roll') || this.playCustom('diceRoll')) return;
     this.init();
     if (!this.ctx) return;
 
@@ -217,6 +219,7 @@ class SoundEngine {
      */
   public playDiceLand() {
     if (this.muted) return;
+    if (this.playCustom('dice_land') || this.playCustom('diceLand')) return;
     this.init();
     if (!this.ctx) return;
 
@@ -252,6 +255,7 @@ class SoundEngine {
    */
   public playSpecialSix() {
     if (this.muted) return;
+    if (this.playCustom('special_six') || this.playCustom('six')) return;
     this.init();
     if (!this.ctx) return;
 
@@ -290,6 +294,7 @@ class SoundEngine {
    */
   public playInvalid() {
     if (this.muted) return;
+    if (this.playCustom('invalid')) return;
     this.init();
     if (!this.ctx) return;
 
@@ -324,6 +329,7 @@ class SoundEngine {
    */
   public playLaunch() {
     if (this.muted) return;
+    if (this.playCustom('launch')) return;
     this.init();
     if (!this.ctx) return;
 
@@ -360,6 +366,7 @@ class SoundEngine {
 
   public playTokenMove() {
     if (this.muted) return;
+    if (this.playCustom('token_move') || this.playCustom('tokenMove')) return;
     this.init();
     if (!this.ctx) return;
 
@@ -382,6 +389,7 @@ class SoundEngine {
 
   public playCapture() {
     if (this.muted) return;
+    if (this.playCustom('capture')) return;
     this.init();
     if (!this.ctx) return;
 
@@ -503,6 +511,7 @@ class SoundEngine {
    */
   public playReachHome() {
     if (this.muted) return;
+    if (this.playCustom('reach_home') || this.playCustom('reachHome')) return;
     this.init();
     if (!this.ctx) return;
 
@@ -553,6 +562,7 @@ class SoundEngine {
 
   public playPowerCard() {
     if (this.muted) return;
+    if (this.playCustom('power_card') || this.playCustom('powerCard')) return;
     this.init();
     if (!this.ctx) return;
 
@@ -579,6 +589,7 @@ class SoundEngine {
 
   public playVictory() {
     if (this.muted) return;
+    if (this.playCustom('victory')) return;
     this.init();
     if (!this.ctx) return;
 
