@@ -374,7 +374,7 @@ export const VoiceChat: React.FC<{
             initial={{ opacity: 0, y: 20, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.96 }}
-            className="fixed z-[80] left-3 right-3 mx-auto max-w-sm sm:left-auto sm:right-4 sm:mx-0 sm:max-w-none sm:w-88 h-[min(420px,65dvh)] bg-slate-900/95 backdrop-blur-md border border-slate-700 rounded-2xl shadow-2xl flex flex-col overflow-hidden bottom-[8.25rem]"
+            className="fixed z-[80] left-2 right-2 bottom-16 sm:left-auto sm:right-4 sm:bottom-[8.25rem] sm:w-88 h-[min(380px,52dvh)] bg-slate-900/95 backdrop-blur-md border border-slate-700 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
           >
             {/* Header with Navigation Tabs */}
             <div className="px-3 pt-3 pb-2 bg-gradient-to-r from-purple-600/25 to-indigo-600/15 border-b border-slate-800 space-y-2">
@@ -536,6 +536,16 @@ export const VoiceChat: React.FC<{
               <input
                 value={customText}
                 onChange={(e) => setCustomText(e.target.value)}
+                onFocus={() => {
+                  if (typeof window !== 'undefined') {
+                    window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+                  }
+                }}
+                onBlur={() => {
+                  if (typeof window !== 'undefined') {
+                    window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+                  }
+                }}
                 placeholder="Type custom chat message…"
                 maxLength={80}
                 className="flex-1 py-2 px-3 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-purple-400"
