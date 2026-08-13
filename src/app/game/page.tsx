@@ -3,7 +3,7 @@
 import React, { useEffect, useReducer, useState, Suspense, useRef, useMemo, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Trophy } from 'lucide-react';
+import { ArrowLeft, Trophy, Maximize2, Minimize2 } from 'lucide-react';
 import {
   createInitialGameState,
   gameReducer,
@@ -131,6 +131,23 @@ function GameContent() {
   const [speakerMuted, setSpeakerMuted] = useState(false);
   const timerKeyRef = useRef(0);
   const [diceSettled, setDiceSettled] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const toggleFullscreen = useCallback(() => {
+    if (typeof document === 'undefined') return;
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
+    } else {
+      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const onFS = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onFS);
+    return () => document.removeEventListener('fullscreenchange', onFS);
+  }, []);
+
   const fitBoard = useFitBoard();
 
   // Tracks whether SSE has fired recently (to suppress redundant poll)
@@ -924,7 +941,7 @@ function GameContent() {
   // then let the observer refine the exact size. Never a blank stage.
   const fallbackBoardSize =
     typeof window !== 'undefined'
-      ? Math.max(200, Math.min(window.innerWidth - 24, window.innerHeight - (window.innerWidth < 640 ? 230 : 320)))
+      ? Math.max(200, Math.min(window.innerWidth - 8, window.innerHeight - (window.innerWidth < 640 ? 104 : 320)))
       : 0;
   const boardRenderSize = fitBoard.boardSize > 0 ? fitBoard.boardSize : fallbackBoardSize;
 
@@ -953,7 +970,7 @@ function GameContent() {
   const yellowCard = seatCard('yellow');
 
   return (
-    <main className="game-room h-[100dvh] w-full overflow-hidden flex flex-col justify-between p-2 pb-0 select-none relative text-white">
+    <main className="game-room mobile-gameplay-viewport h-[100dvh] w-full overflow-hidden flex flex-col justify-between p-0 sm:p-2 select-none relative text-white overscroll-none touch-manipulation">
 
       {/* Reconnect Modal */}
       <AnimatePresence>
@@ -1129,30 +1146,30 @@ function GameContent() {
       ) : (
         <>
           {/* Top Bar Navigation — compact game header */}
-          <header className="relative z-[70] flex items-center justify-between max-w-[1400px] mx-auto w-full h-11 px-2 sm:px-3 bg-slate-900/85 backdrop-blur-md rounded-2xl border border-slate-700/60 shadow-lg flex-shrink-0">
+          <header className="relative z-[70] flex items-center justify-between max-w-[1400px] mx-auto w-full h-10 sm:h-11 px-2 sm:px-3 bg-slate-900/85 backdrop-blur-md rounded-none sm:rounded-2xl border-b sm:border border-slate-700/60 shadow-lg flex-shrink-0">
             <div className="flex items-center gap-1.5 min-w-0">
               <button
                 onClick={handleLeaveRoom}
-                className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition-colors shrink-0"
+                className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition-colors shrink-0"
                 aria-label="Leave game"
               >
-                <ArrowLeft className="w-4 h-4" />
+                <ArrowLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </button>
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="text-lg leading-none">🎲</span>
-                <span className="font-extrabold text-[11px] tracking-tight hidden sm:inline">LUDO</span>
+              <div className="flex items-center gap-1 min-w-0">
+                <span className="text-base sm:text-lg leading-none">🎲</span>
+                <span className="font-extrabold text-[10px] sm:text-[11px] tracking-tight hidden sm:inline">LUDO</span>
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5 shrink-0">
-              <div className="bg-slate-950/80 px-2 py-1 rounded-full border border-slate-800 text-[9px] font-bold text-slate-300 flex items-center gap-1 shrink-0">
+            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+              <div className="bg-slate-950/80 px-2 py-0.5 sm:py-1 rounded-full border border-slate-800 text-[9px] font-bold text-slate-300 flex items-center gap-1 shrink-0">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                 <span className="hidden sm:inline">ROOM:</span>{' '}
                 <span className="text-amber-400 font-extrabold">{roomCode}</span>
               </div>
               {mode === 'room' && pingMs !== null && (
                 <div
-                  className="px-2 py-1 rounded-full border text-[9px] font-black flex items-center gap-1 shrink-0 bg-slate-950/90 shadow-sm"
+                  className="px-1.5 py-0.5 sm:py-1 rounded-full border text-[8px] sm:text-[9px] font-black flex items-center gap-1 shrink-0 bg-slate-950/90 shadow-sm"
                   style={{
                     borderColor: pingMs < 80 ? 'rgba(52, 211, 153, 0.4)' : pingMs < 160 ? 'rgba(251, 191, 36, 0.4)' : 'rgba(248, 113, 113, 0.4)',
                     color: pingMs < 80 ? '#34d399' : pingMs < 160 ? '#fbbf24' : '#f87171',
@@ -1168,13 +1185,20 @@ function GameContent() {
               )}
             </div>
 
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1 sm:gap-1.5">
+              <button
+                onClick={toggleFullscreen}
+                className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-slate-800 text-purple-300 hover:text-white flex items-center justify-center transition-colors shrink-0"
+                aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+              >
+                {isFullscreen ? <Minimize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Maximize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
+              </button>
               <button
                 onClick={() => setShowLeaderboard(true)}
-                className="w-8 h-8 rounded-full bg-slate-800 text-amber-300 hover:text-amber-200 flex items-center justify-center transition-colors"
+                className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-slate-800 text-amber-300 hover:text-amber-200 flex items-center justify-center transition-colors shrink-0"
                 aria-label="Leaderboard"
               >
-                <Trophy className="w-4 h-4" />
+                <Trophy className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </button>
               <div className="p-0.5 rounded-full bg-slate-800 hover:bg-slate-700 transition-colors shrink-0">
                 <CharacterAvatar
@@ -1182,7 +1206,7 @@ function GameContent() {
                   image={profile.avatarUrl}
                   onClick={() => setShowProfileSheet(true)}
                   aria-label="Open player profile"
-                  className="w-7 h-7"
+                  className="w-6 h-6 sm:w-7 sm:h-7"
                 />
               </div>
               <AudioSettings />

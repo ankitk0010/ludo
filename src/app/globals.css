@@ -52,6 +52,18 @@
   .safe-area-t {
     padding-top: env(safe-area-inset-top);
   }
+
+  .mobile-gameplay-viewport {
+    height: 100dvh;
+    width: 100vw;
+    overflow: hidden;
+    touch-action: manipulation;
+    overscroll-behavior: none;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
 }
 
 /* A warm premium gaming font stack (Google-font optional, graceful fallback). */
