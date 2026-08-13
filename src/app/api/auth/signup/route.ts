@@ -35,13 +35,17 @@ export async function POST(request: Request) {
       }
     }
 
+    const avatar = body.avatar && typeof body.avatar === 'string' && body.avatar.trim()
+      ? body.avatar.trim()
+      : '🦊';
+
     const user = await prisma.user.create({
       data: {
         username,
         displayName: displayName || null,
         passwordHash: hashPassword(password),
         characterId,
-        avatar: '🦊',
+        avatar,
         email,
       },
     });

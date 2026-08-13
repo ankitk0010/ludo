@@ -28,6 +28,7 @@ import { LobbySocial } from '@/components/lobby/LobbySocial';
 import { OpponentStrip } from '@/components/game/OpponentStrip';
 import { OpponentProfileSheet } from '@/components/profile/OpponentProfileSheet';
 import { PerformanceMonitor } from '@/components/game/PerformanceMonitor';
+import AuthModal from '@/components/auth/AuthModal';
 import { soundEngine, refreshSfxOverrides, setupAudioUnlockListener } from '@/components/sound/soundEngine';
 import { AudioSettings } from '@/components/sound/AudioSettings';
 import { ProfileDrawer } from '@/components/profile/ProfileDrawer';
@@ -35,7 +36,7 @@ import { CharacterAvatar } from '@/components/avatar/CharacterAvatar';
 import { gameTheme } from '@/theme/tokens';
 import { getCharacter } from '@/game/characters';
 import { isImageAvatar } from '@/game/avatars';
-import { loadProfile, saveProfile, profileName, PlayerProfile, getAuthToken, recordMatchWin, recordMatchLoss } from '@/game/profile';
+import { loadProfile, saveProfile, saveAuthToken, profileName, PlayerProfile, getAuthToken, recordMatchWin, recordMatchLoss } from '@/game/profile';
 import { loadSettings, GameSettings, BOARD_THEME_ACCENT } from '@/game/settings';
 import { apiUpdateProfile, apiGetMe } from '@/lib/authClient';
 import {
@@ -127,6 +128,16 @@ function GameContent() {
   const roomJoinedRef = useRef(false);
   const [roomAttempt, setRoomAttempt] = useState(0);
   const [viewProfile, setViewProfile] = useState<Player | null>(null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+
+  const handleAuthCompleted = useCallback((p: PlayerProfile, authToken: string) => {
+    saveProfile(p);
+    saveAuthToken(authToken);
+    setProfile(p);
+    setShowAuthModal(false);
+    roomJoinedRef.current = false;
+    setRoomAttempt((a) => a + 1);
+  }, []);
 
   const [speakerMuted, setSpeakerMuted] = useState(false);
   const timerKeyRef = useRef(0);
@@ -314,6 +325,14 @@ function GameContent() {
   useEffect(() => {
     if (!mounted || mode !== 'room' || !inLobby) return;
     if (roomJoinedRef.current) return;
+
+    // Unregistered invited player guard: require registration/login before joining online rooms
+    const token = getAuthToken();
+    if (!token) {
+      setShowAuthModal(true);
+      return;
+    }
+
     roomJoinedRef.current = true;
 
     const myName = profileName(profile) || (isHost ? 'Host' : 'Player');
@@ -1560,6 +1579,13 @@ function GameContent() {
         homeCount={viewProfile ? homeCounts[viewProfile.color] ?? 0 : 0}
         localPlay={mode !== 'room'}
         friendable={mode === 'room'}
+      />
+      {/* Registration / Login Modal required for room invites */}
+      <AuthModal
+        open={showAuthModal}
+        onClose={handleLeaveRoom}
+        initial={profile}
+        onAuthenticated={handleAuthCompleted}
       />
       <PerformanceMonitor pingMs={pingMs} mode={mode} />
     </main>

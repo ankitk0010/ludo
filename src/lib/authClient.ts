@@ -36,6 +36,7 @@ export async function apiSignup(input: {
   displayName?: string;
   email?: string;
   characterId: PlayerProfile['characterId'];
+  avatar?: string;
 }): Promise<AuthResponse> {
   return postJson('/api/auth/signup', input);
 }

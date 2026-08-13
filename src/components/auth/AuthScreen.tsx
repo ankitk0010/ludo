@@ -6,6 +6,7 @@ import { Rocket, LogIn, Loader, Dice6, ShieldCheck, Mail, ArrowLeft, CheckCircle
 import { PlayerColor } from '@/game/engine/types';
 import { AvatarSelector } from '@/components/avatar/AvatarSelector';
 import { PlayerProfile } from '@/game/profile';
+import { PRESET_AVATARS } from '@/game/avatars';
 import { apiSignup, apiLogin, apiForgotPassword, toProfile } from '@/lib/authClient';
 
 type Tab = 'signup' | 'login';
@@ -26,6 +27,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initial, onAuthenticated
   const [tab, setTab] = useState<Tab>('signup');
   const [view, setView] = useState<View>('auth');
   const [character, setCharacter] = useState<PlayerColor>(initial?.characterId || 'red');
+  const [avatarImage, setAvatarImage] = useState<string>(initial?.avatarUrl || '');
   const [username, setUsername] = useState(initial?.username || '');
   const [displayName, setDisplayName] = useState(initial?.displayName || '');
   const [email, setEmail] = useState(initial?.email || '');
@@ -34,6 +36,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initial, onAuthenticated
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [forgotSent, setForgotSent] = useState(false);
+
+  const pickAvatar = (file: File) => {
+    if (!file.type.startsWith('image/')) return;
+    if (file.size > 2_600_000) return;
+    const reader = new FileReader();
+    reader.onload = () => setAvatarImage(String(reader.result || ''));
+    reader.readAsDataURL(file);
+  };
 
   const switchTab = (next: Tab) => {
     setTab(next);
@@ -82,6 +92,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initial, onAuthenticated
               displayName: displayName.trim() || undefined,
               email: email.trim() || undefined,
               characterId: character,
+              avatar: avatarImage || undefined,
             })
           : await apiLogin({ username: username.trim(), password });
 
@@ -253,6 +264,63 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initial, onAuthenticated
                       Choose your avatar
                     </div>
                     <AvatarSelector selected={character} onSelect={setCharacter} />
+
+                    {/* Avatar image selection (presets + custom upload) */}
+                    <div className="mt-4 pt-3 border-t border-slate-800/80">
+                      <div className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-2 flex items-center justify-between">
+                        <span>Avatar Profile Picture <span className="text-slate-500 normal-case">(optional)</span></span>
+                        {avatarImage && (
+                          <button
+                            type="button"
+                            onClick={() => setAvatarImage('')}
+                            className="text-[9px] font-black text-red-400 hover:text-red-300"
+                          >
+                            ✕ Remove
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Presets */}
+                      <div className="grid grid-cols-4 gap-2 mb-2">
+                        {PRESET_AVATARS.map((a) => (
+                          <button
+                            key={a.id}
+                            type="button"
+                            onClick={() => setAvatarImage(a.data)}
+                            title={a.label}
+                            className={`w-full aspect-square rounded-full overflow-hidden border-2 transition-transform active:scale-90 ${
+                              avatarImage === a.data
+                                ? 'border-purple-400 ring-2 ring-purple-400/40 scale-105'
+                                : 'border-transparent hover:border-slate-600 opacity-80 hover:opacity-100'
+                            }`}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={a.data} alt={a.label} className="w-full h-full object-cover" />
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Custom image upload button */}
+                      <label className="flex items-center gap-3 rounded-xl bg-slate-950/90 border border-slate-700/80 px-3 py-2 cursor-pointer hover:border-purple-400/60 transition-colors">
+                        <span className="w-9 h-9 rounded-full shrink-0 overflow-hidden flex items-center justify-center bg-slate-800 border border-slate-700">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          {avatarImage ? <img src={avatarImage} alt="Avatar preview" className="w-full h-full object-cover" /> : <span className="text-sm">📷</span>}
+                        </span>
+                        <span className="text-[11px] font-bold text-slate-300 flex-1 truncate">
+                          {avatarImage ? 'Change custom photo' : 'Upload custom profile image'}
+                        </span>
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) pickAvatar(f);
+                            e.currentTarget.value = '';
+                          }}
+                        />
+                      </label>
+                    </div>
                   </div>
                 </motion.div>
               )}
