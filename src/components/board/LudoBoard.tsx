@@ -136,16 +136,41 @@ function HomeBase({ color, position }: { color: PlayerColor; position: string })
   );
 }
 
-export const LudoBoard: React.FC<LudoBoardProps> = ({
+const LudoBoardBase: React.FC<LudoBoardProps> = ({
   gameState,
   legalMoves,
   onSelectToken,
   gotiShape = 'classic',
   theme = 'ocean',
 }) => {
-  const legalTokenIds = legalMoves.map((m) => m.tokenId);
-  const allTokens = Object.values(gameState.tokens).flat();
+  const legalTokenSet = React.useMemo(() => new Set(legalMoves.map((m) => m.tokenId)), [legalMoves]);
   const accent = BOARD_THEME_ACCENT[theme];
+
+  const { allTokens, tokenMap } = React.useMemo(() => {
+    const all = Object.values(gameState.tokens).flat();
+    const map = new Map<string, { sameCellCount: number; stackIdx: number }>();
+    const cellTokensMap = new Map<string, string[]>();
+
+    for (const t of all) {
+      const cell = getStepGridCell(t.color, t.index, t.stepCount, t.status);
+      const key = `${cell.row}_${cell.col}`;
+      let list = cellTokensMap.get(key);
+      if (!list) {
+        list = [];
+        cellTokensMap.set(key, list);
+      }
+      list.push(t.id);
+    }
+
+    for (const t of all) {
+      const cell = getStepGridCell(t.color, t.index, t.stepCount, t.status);
+      const key = `${cell.row}_${cell.col}`;
+      const sameCell = cellTokensMap.get(key) || [];
+      const stackIdx = sameCell.indexOf(t.id);
+      map.set(t.id, { sameCellCount: sameCell.length, stackIdx });
+    }
+    return { allTokens: all, tokenMap: map };
+  }, [gameState.tokens]);
 
   return (
     <div className="relative w-full h-full aspect-square select-none">
@@ -153,10 +178,8 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
       <div className="board-glow" />
 
       {/* Ambient radial bloom around the board */}
-      <motion.div
-        className="absolute -inset-4 rounded-[2.4rem] pointer-events-none"
-        animate={{ opacity: [0.5, 0.85, 0.5] }}
-        transition={{ repeat: Infinity, duration: 4.5, ease: 'easeInOut' }}
+      <div
+        className="absolute -inset-4 rounded-[2.4rem] pointer-events-none opacity-70"
         style={{
           background: `radial-gradient(ellipse at 50% 50%, ${accent}30 0%, transparent 68%)`,
           filter: 'blur(20px)',
@@ -221,17 +244,12 @@ export const LudoBoard: React.FC<LudoBoardProps> = ({
                     gridColumnStart: cell.col + 1,
                     background: startColor ? COLOR_START_BG[startColor] : undefined,
                   }}
-className={`relative border border-white/[0.07] flex items-center justify-center inset-glow ${
-  !startColor ? 'bg-[#16233f]' : ''
-}`}
+                  className={`relative border border-white/[0.07] flex items-center justify-center inset-glow ${
+                    !startColor ? 'bg-[#16233f]' : ''
+                  }`}
                 >
                   {isStar && !startColor && (
-                    <motion.div
-                      animate={{ rotate: [0, 18, -18, 0], scale: [1, 1.2, 1] }}
-                      transition={{ repeat: Infinity, duration: 3, ease: 'easeInOut' }}
-                    >
-                      <Star className="w-[10px] h-[10px] text-amber-300 fill-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,1)]" />
-                    </motion.div>
+                    <Star className="w-[10px] h-[10px] text-amber-300 fill-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,1)] opacity-90" />
                   )}
                   {startColor && (
                     <div
@@ -264,14 +282,7 @@ className={`relative border border-white/[0.07] flex items-center justify-center
                     }}
                     className="border border-white/[0.04] flex items-center justify-center"
                   >
-                    <motion.span
-                      animate={{ opacity: [0.45, 1, 0.45] }}
-                      transition={{
-                        repeat: Infinity,
-                        duration: 1.6,
-                        ease: 'easeInOut',
-                        delay: idx * 0.14,
-                      }}
+                    <span
                       style={{
                         fontSize: '7px',
                         lineHeight: 1,
@@ -280,10 +291,11 @@ className={`relative border border-white/[0.07] flex items-center justify-center
                         transform: `rotate(${rotation}deg)`,
                         display: 'inline-block',
                         textShadow: `0 0 8px ${p.primary}`,
+                        opacity: 0.85,
                       }}
                     >
                       ▶
-                    </motion.span>
+                    </span>
                   </div>
                 );
               })
@@ -294,27 +306,23 @@ className={`relative border border-white/[0.07] flex items-center justify-center
               className="col-start-7 row-start-7 col-span-3 row-span-3 relative overflow-hidden flex items-center justify-center"
               style={{ background: '#0d1c38' }}
             >
-              {/* Four animated color triangles */}
+              {/* Four color triangles */}
               {[
-                { clip: 'polygon(0 0, 0 100%, 50% 50%)',       color: gameTheme.players.red.primary,    delay: 0 },
-                { clip: 'polygon(0 0, 100% 0, 50% 50%)',       color: gameTheme.players.green.primary,  delay: 0.35 },
-                { clip: 'polygon(100% 0, 100% 100%, 50% 50%)', color: gameTheme.players.yellow.primary, delay: 0.7 },
-                { clip: 'polygon(0 100%, 100% 100%, 50% 50%)', color: gameTheme.players.blue.primary,   delay: 1.05 },
+                { clip: 'polygon(0 0, 0 100%, 50% 50%)',       color: gameTheme.players.red.primary },
+                { clip: 'polygon(0 0, 100% 0, 50% 50%)',       color: gameTheme.players.green.primary },
+                { clip: 'polygon(100% 0, 100% 100%, 50% 50%)', color: gameTheme.players.yellow.primary },
+                { clip: 'polygon(0 100%, 100% 100%, 50% 50%)', color: gameTheme.players.blue.primary },
               ].map((t, i) => (
-                <motion.div
+                <div
                   key={i}
-                  className="absolute inset-0"
-                  animate={{ opacity: [0.7, 1, 0.7] }}
-                  transition={{ repeat: Infinity, duration: 2.8, ease: 'easeInOut', delay: t.delay }}
+                  className="absolute inset-0 opacity-90"
                   style={{ clipPath: t.clip, background: t.color }}
                 />
               ))}
 
-              {/* White shimmer pulse */}
-              <motion.div
-                className="absolute inset-0 pointer-events-none"
-                animate={{ opacity: [0, 0.3, 0] }}
-                transition={{ repeat: Infinity, duration: 2.2, ease: 'easeInOut' }}
+              {/* White shimmer highlight */}
+              <div
+                className="absolute inset-0 pointer-events-none opacity-20"
                 style={{
                   background: 'radial-gradient(circle at 50% 50%, rgba(255,255,255,0.5), transparent 60%)',
                 }}
@@ -322,9 +330,7 @@ className={`relative border border-white/[0.07] flex items-center justify-center
 
               {/* Crown circle */}
               <div className="relative z-10">
-                <motion.div
-                  animate={{ rotate: 360 }}
-                  transition={{ repeat: Infinity, duration: 16, ease: 'linear' }}
+                <div
                   className="w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center"
                   style={{
                     background: 'radial-gradient(circle, #10203a 0%, #060f1c 100%)',
@@ -333,28 +339,21 @@ className={`relative border border-white/[0.07] flex items-center justify-center
                   }}
                 >
                   <Crown className="w-5 h-5 sm:w-6 sm:h-6 text-amber-400 fill-amber-300 drop-shadow-[0_0_10px_rgba(251,191,36,1)]" />
-                </motion.div>
+                </div>
               </div>
             </div>
 
             {/* TOKENS */}
             {allTokens.map((token) => {
-              const tokenCell = getStepGridCell(token.color, token.index, token.stepCount, token.status);
-              const sameCellTokens = allTokens.filter((t) => {
-                if (t.id === token.id) return true;
-                const c = getStepGridCell(t.color, t.index, t.stepCount, t.status);
-                return c.row === tokenCell.row && c.col === tokenCell.col;
-              });
-              const stackIdx = sameCellTokens.findIndex((t) => t.id === token.id);
-
+              const meta = tokenMap.get(token.id) || { sameCellCount: 1, stackIdx: 0 };
               return (
                 <TokenComponent
                   key={token.id}
                   token={token}
-                  isLegalMove={legalTokenIds.includes(token.id)}
+                  isLegalMove={legalTokenSet.has(token.id)}
                   onSelect={onSelectToken}
-                  stackOffsetIndex={stackIdx}
-                  totalInCell={sameCellTokens.length}
+                  stackOffsetIndex={meta.stackIdx}
+                  totalInCell={meta.sameCellCount}
                   shape={gotiShape}
                 />
               );
@@ -365,3 +364,5 @@ className={`relative border border-white/[0.07] flex items-center justify-center
     </div>
   );
 };
+
+export const LudoBoard = React.memo(LudoBoardBase);

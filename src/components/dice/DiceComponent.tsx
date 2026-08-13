@@ -65,7 +65,7 @@ const CUBE_FACES = [
   { face: 5, transform: `rotateX(-90deg) translateZ(${HALF}px)` },
 ];
 
-export const DiceComponent: React.FC<DiceComponentProps> = ({
+const DiceComponentBase: React.FC<DiceComponentProps> = ({
   diceState,
   activeColor,
   isMyTurn,
@@ -130,9 +130,9 @@ export const DiceComponent: React.FC<DiceComponentProps> = ({
         setShowResult(true);
         soundEngine.playDiceLand();
         if (rolledValue === 6) {
-          setTimeout(() => soundEngine.playSpecialSix(), 160);
+          setTimeout(() => soundEngine.playSpecialSix(), 120);
         }
-      }, 1150);
+      }, 450);
     });
 
     return () => {
@@ -141,8 +141,12 @@ export const DiceComponent: React.FC<DiceComponentProps> = ({
     };
   }, [diceState.value, diceState.rolling]);
 
+  const lastRollClickRef = useRef(0);
   const handleRollClick = () => {
+    const now = Date.now();
+    if (now - lastRollClickRef.current < 600) return; // double-click guard
     if (!isMyTurn || diceState.mustMove || isRolling || noLegalMove || diceState.rolling) return;
+    lastRollClickRef.current = now;
     soundEngine.playDiceRoll();
     onRoll();
   };
@@ -225,7 +229,7 @@ export const DiceComponent: React.FC<DiceComponentProps> = ({
           {/* Bounce wrapper */}
           <motion.div
             animate={isRolling ? { y: [0, -20, -18, 2, -8, 0] } : { y: 0 }}
-            transition={isRolling ? { duration: 1.15, ease: [0.22, 0.61, 0.36, 1] } : {}}
+            transition={isRolling ? { duration: 0.45, ease: [0.22, 0.61, 0.36, 1] } : {}}
             className="flex items-center justify-center"
           >
             {/* Shake wrapper for invalid rolls */}
@@ -239,7 +243,7 @@ export const DiceComponent: React.FC<DiceComponentProps> = ({
               {/* 3D Rotating Cube */}
               <motion.div
                 animate={{ rotateX: rotation.rx, rotateY: rotation.ry }}
-                transition={{ duration: 1.15, ease: [0.22, 0.61, 0.36, 1] }}
+                transition={{ duration: 0.45, ease: [0.22, 0.61, 0.36, 1] }}
                 onClick={handleRollClick}
                 style={{
                   width: DICE_SIZE,
@@ -368,3 +372,5 @@ export const DiceComponent: React.FC<DiceComponentProps> = ({
     </div>
   );
 };
+
+export const DiceComponent = React.memo(DiceComponentBase);

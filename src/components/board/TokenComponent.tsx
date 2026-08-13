@@ -31,7 +31,7 @@ const STACK_OFFSETS: Record<number, { dx: number; dy: number }[]> = {
 
 type TokenPhase = 'idle' | 'forward' | 'hit' | 'returning' | 'landing' | 'finished';
 
-export const TokenComponent: React.FC<TokenComponentProps> = ({
+const TokenComponentBase: React.FC<TokenComponentProps> = ({
   token,
   isLegalMove,
   onSelect,
@@ -181,12 +181,14 @@ export const TokenComponent: React.FC<TokenComponentProps> = ({
 
   // Characters fill the full cell; slightly smaller than the cell for a gap.
   const radius = tokenSizePct;
+  const xTranslatePct = (leftPct / radius) * 100;
+  const yTranslatePct = (topPct / radius) * 100;
 
   return (
     <motion.div
       animate={{
-        top: `${topPct}%`,
-        left: `${leftPct}%`,
+        x: `${xTranslatePct}%`,
+        y: `${yTranslatePct}%`,
         scale: phase === 'landing'
           ? [0.6, 1.35, 1]
           : isHit || isReturning
@@ -198,8 +200,8 @@ export const TokenComponent: React.FC<TokenComponentProps> = ({
         opacity: isHit ? 0.6 : isReturning ? 0.85 : phase === 'landing' ? 0.9 : 1,
       }}
       transition={{
-        top: { type: 'spring', stiffness: 320, damping: 24 },
-        left: { type: 'spring', stiffness: 320, damping: 24 },
+        x: { type: 'spring', stiffness: 320, damping: 24 },
+        y: { type: 'spring', stiffness: 320, damping: 24 },
         scale: { duration: isHit ? 0.08 : isReturning ? 0.1 : phase === 'landing' ? 0.4 : 0.14, ease: 'easeInOut' },
         rotate: { duration: 0.5, ease: 'easeInOut' },
         opacity: { duration: 0.25, ease: 'easeOut' },
@@ -207,10 +209,13 @@ export const TokenComponent: React.FC<TokenComponentProps> = ({
       onClick={() => isLegalMove && onSelect(token.id)}
       style={{
         position: 'absolute',
+        top: 0,
+        left: 0,
         width: `${radius}%`,
         height: `${radius}%`,
         zIndex: affected || isLegalMove ? 35 : 10 + stackOffsetIndex,
         cursor: isLegalMove ? 'pointer' : 'default',
+        willChange: affected ? 'transform' : 'auto',
       }}
       className="flex items-center justify-center select-none"
     >
@@ -289,7 +294,7 @@ export const TokenComponent: React.FC<TokenComponentProps> = ({
         </>
       )}
 
-      {/* Character-based goti with soft walk/selection motion */}
+      {/* Character-based goti */}
       <motion.div
         animate={
           isLegalMove
@@ -298,16 +303,12 @@ export const TokenComponent: React.FC<TokenComponentProps> = ({
               ? { y: [0, -6, 0] }
               : phase === 'finished'
                 ? { y: [0, -4, 0], scale: [1, 1.06, 1] }
-                : phase === 'idle'
-                  ? { y: [0, -2.2, 0] }
-                  : { y: 0 }
+                : { y: 0 }
         }
         transition={
           isLegalMove || isReturning || phase === 'finished'
             ? { repeat: Infinity, duration: 0.85, ease: 'easeInOut' }
-            : phase === 'idle'
-              ? { repeat: Infinity, duration: 2.4, ease: 'easeInOut' }
-              : {}
+            : {}
         }
         className="relative w-full h-full flex items-center justify-center"
       >
@@ -355,3 +356,17 @@ export const TokenComponent: React.FC<TokenComponentProps> = ({
     </motion.div>
   );
 };
+
+export const TokenComponent = React.memo(TokenComponentBase, (prev, next) => {
+  return (
+    prev.token.id === next.token.id &&
+    prev.token.stepCount === next.token.stepCount &&
+    prev.token.status === next.token.status &&
+    prev.token.index === next.token.index &&
+    prev.token.color === next.token.color &&
+    prev.isLegalMove === next.isLegalMove &&
+    prev.stackOffsetIndex === next.stackOffsetIndex &&
+    prev.totalInCell === next.totalInCell &&
+    prev.shape === next.shape
+  );
+});

@@ -28,7 +28,7 @@ interface LocalPlayerDockProps {
  * turn / speaking / home states and embeds the mic + speaker controls — no
  * separate control row eating up screen space.
  */
-export const LocalPlayerDock: React.FC<LocalPlayerDockProps> = ({
+const LocalPlayerDockBase: React.FC<LocalPlayerDockProps> = ({
   player: p,
   currentColor,
   speakingColor,
@@ -127,4 +127,5 @@ export const LocalPlayerDock: React.FC<LocalPlayerDockProps> = ({
   );
 };
 
+export const LocalPlayerDock = React.memo(LocalPlayerDockBase);
 export default LocalPlayerDock;

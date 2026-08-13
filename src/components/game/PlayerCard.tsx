@@ -34,7 +34,7 @@ interface PlayerCardProps {
  * mobile top/bottom strips. Shows avatar, name, color, home progress, mic /
  * speaking / mute status, connection state and a glowing current-turn frame.
  */
-export const PlayerCard: React.FC<PlayerCardProps> = ({
+const PlayerCardBase: React.FC<PlayerCardProps> = ({
   player: p,
   currentColor,
   speakingColor,
@@ -263,4 +263,5 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
   );
 };
 
+export const PlayerCard = React.memo(PlayerCardBase);
 export default PlayerCard;

@@ -116,26 +116,60 @@ export interface RoomVoiceInput {
   icon?: string;
 }
 
-/** Subscribe to real-time room pushes (SSE). Returns an unsubscribe function. */
+const activeStreams = new Map<
+  string,
+  { source: EventSource; listeners: Set<(event: RoomStreamEvent) => void> }
+>();
+
+/** Subscribe to real-time room pushes (SSE). Returns an unsubscribe function. Guarantee max 1 SSE connection per room. */
 export function subscribeRoomStream(
   code: string,
   onEvent: (event: RoomStreamEvent) => void
 ): () => void {
-  let source: EventSource | null = null;
-  try {
-    source = new EventSource(`/api/rooms/${encodeURIComponent(code)}/game/stream`);
-    source.onmessage = (e) => {
-      try {
-        const event = JSON.parse(e.data) as RoomStreamEvent;
-        onEvent(event);
-      } catch {
-        /* ignore malformed frames */
-      }
-    };
-  } catch {
-    /* EventSource unsupported — the polling fallback still covers it */
+  const key = code.toUpperCase();
+  let stream = activeStreams.get(key);
+
+  if (!stream) {
+    let source: EventSource | null = null;
+    const listeners = new Set<(event: RoomStreamEvent) => void>();
+    try {
+      source = new EventSource(`/api/rooms/${encodeURIComponent(key)}/game/stream`);
+      source.onmessage = (e) => {
+        try {
+          const event = JSON.parse(e.data) as RoomStreamEvent;
+          listeners.forEach((fn) => {
+            try {
+              fn(event);
+            } catch {
+              /* ignore listener error */
+            }
+          });
+        } catch {
+          /* ignore malformed frames */
+        }
+      };
+    } catch {
+      /* EventSource unsupported */
+    }
+    if (source) {
+      stream = { source, listeners };
+      activeStreams.set(key, stream);
+    }
   }
-  return () => source?.close();
+
+  if (stream) {
+    stream.listeners.add(onEvent);
+  }
+
+  return () => {
+    if (stream) {
+      stream.listeners.delete(onEvent);
+      if (stream.listeners.size === 0) {
+        stream.source.close();
+        activeStreams.delete(key);
+      }
+    }
+  };
 }
 
 export async function apiRoomState(code: string, deviceId?: string): Promise<{

@@ -27,6 +27,7 @@ import { LobbyRoom } from '@/components/lobby/LobbyRoom';
 import { LobbySocial } from '@/components/lobby/LobbySocial';
 import { OpponentStrip } from '@/components/game/OpponentStrip';
 import { OpponentProfileSheet } from '@/components/profile/OpponentProfileSheet';
+import { PerformanceMonitor } from '@/components/game/PerformanceMonitor';
 import { soundEngine, refreshSfxOverrides, setupAudioUnlockListener } from '@/components/sound/soundEngine';
 import { AudioSettings } from '@/components/sound/AudioSettings';
 import { ProfileDrawer } from '@/components/profile/ProfileDrawer';
@@ -140,6 +141,9 @@ function GameContent() {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Prevent duplicate victory recording across re-renders
   const victoryRecordedRef = useRef<string | null>(null);
+  // Action in-flight throttling ref
+  const actionInFlightRef = useRef(false);
+  const lastActionTsRef = useRef(0);
 
   // Mirrors `inLobby` so the SSE callback can read it without re-subscribing.
   const inLobbyRef = useRef(inLobby);
@@ -253,6 +257,15 @@ function GameContent() {
   // In local mode: everything dispatches locally.
   const doAction = useCallback(
     (action: GameAction) => {
+      const now = Date.now();
+      if (actionInFlightRef.current && now - lastActionTsRef.current < 400) return;
+      actionInFlightRef.current = true;
+      lastActionTsRef.current = now;
+
+      const resetFlight = () => {
+        setTimeout(() => { actionInFlightRef.current = false; }, 300);
+      };
+
       if (mode === 'room' && !inLobby) {
         // Only non-movement actions get local optimistic dispatch
         if (action.type !== 'ROLL_DICE' && action.type !== 'SELECT_TOKEN') {
@@ -260,10 +273,12 @@ function GameContent() {
         }
         apiRoomAction(roomCode, deviceId, action)
           .then((res) => {
+            resetFlight();
             if (!res.state) return;
             applyServerState(res.state);
           })
           .catch(() => {
+            resetFlight();
             apiRoomState(roomCode, deviceId)
               .then((s) => {
                 if (s.state) applyServerState(s.state);
@@ -273,6 +288,7 @@ function GameContent() {
         return;
       }
       dispatch(action);
+      resetFlight();
     },
     [mode, inLobby, roomCode, deviceId, applyServerState]
   );
@@ -280,7 +296,8 @@ function GameContent() {
   // ---- Join the online room once (host creates it, guest joins it) ----
   useEffect(() => {
     if (!mounted || mode !== 'room' || !inLobby) return;
-    if (roomJoinedRef.current) return;    roomJoinedRef.current = true;
+    if (roomJoinedRef.current) return;
+    roomJoinedRef.current = true;
 
     const myName = profileName(profile) || (isHost ? 'Host' : 'Player');
     const join = async () => {
@@ -311,6 +328,15 @@ function GameContent() {
     void join();
   }, [mounted, mode, inLobby, isHost, roomCode, profile, deviceId, roomAttempt]);
 
+  const applyServerStateRef = useRef(applyServerState);
+  useEffect(() => { applyServerStateRef.current = applyServerState; }, [applyServerState]);
+
+  const ingestVoiceRef = useRef(ingestVoice);
+  useEffect(() => { ingestVoiceRef.current = ingestVoice; }, [ingestVoice]);
+
+  const beginStartCountdownRef = useRef(beginStartCountdown);
+  useEffect(() => { beginStartCountdownRef.current = beginStartCountdown; }, [beginStartCountdown]);
+
   // ---- Real-time push: subscribe to the room SSE stream ----
   useEffect(() => {
     if (!mounted || mode !== 'room' || roomError) return;
@@ -320,19 +346,19 @@ function GameContent() {
       if (event.type === 'state') {
         // The host started the match — pull in the authoritative state and join the game.
         if (event.status === 'PLAYING' && event.state && inLobbyRef.current) {
-          applyServerState(event.state);
+          applyServerStateRef.current(event.state);
           setInLobby(false);
-          beginStartCountdown();
+          beginStartCountdownRef.current();
           return;
         }
         if (!event.state) return;
-        applyServerState(event.state);
+        applyServerStateRef.current(event.state);
       } else if (event.type === 'voice') {
-        ingestVoice(event.voiceMessages);
+        ingestVoiceRef.current(event.voiceMessages);
       }
     });
     return unsubscribe;
-  }, [mounted, mode, roomCode, roomError, speakerMuted, deviceId, applyServerState, ingestVoice, beginStartCountdown]);
+  }, [mounted, mode, roomCode, roomError]);
 
   // ---- Lobby: slow poll as a safety net / for joiners on other instances ----
   useEffect(() => {
@@ -387,16 +413,14 @@ function GameContent() {
     return () => clearTimeout(t);
   }, [startCountdown]);
 
-  // ---- Dice reveal gate: only show legal-move hints / auto-move AFTER the
-  //      dice finishes its spinning animation (so the number is revealed first).
+  // ---- Dice reveal gate: show legal moves quickly (450ms) ----
   useEffect(() => {
     if (gameState.dice.value === null) {
       const t = setTimeout(() => setDiceSettled(false), 0);
       return () => clearTimeout(t);
     }
-    // Reset to hidden, then reveal after the ~1.15s roll animation.
     const reset = setTimeout(() => setDiceSettled(false), 0);
-    const t = setTimeout(() => setDiceSettled(true), 1250);
+    const t = setTimeout(() => setDiceSettled(true), 450);
     return () => {
       clearTimeout(reset);
       clearTimeout(t);
@@ -1513,6 +1537,7 @@ function GameContent() {
         localPlay={mode !== 'room'}
         friendable={mode === 'room'}
       />
+      <PerformanceMonitor pingMs={pingMs} mode={mode} />
     </main>
   );
 }

@@ -24,7 +24,7 @@ interface OpponentStripProps {
  * chips that never shrink or collapse over each other. Each chip is tappable
  * to open the player's profile (view profile / add friend / invite).
  */
-export const OpponentStrip: React.FC<OpponentStripProps> = ({
+const OpponentStripBase: React.FC<OpponentStripProps> = ({
   players,
   currentColor,
   speakingColor,
@@ -111,4 +111,5 @@ export const OpponentStrip: React.FC<OpponentStripProps> = ({
   );
 };
 
+export const OpponentStrip = React.memo(OpponentStripBase);
 export default OpponentStrip;
